@@ -13,13 +13,13 @@ class GetHandler(BaseHTTPRequestHandler):
         q = parsed_path.query
         method = urlparse.parse_qs(q)['method'][0]
         if method == 'json2rss':
-            self.wfile.write(json2rss(q))
+            self.wfile.write(json2atom(q))
             return;
         if method == 'activity':
             self.wfile.write(activity(q))
             return;
 
-def json2rss(q):
+def json2atom(q):
     tag = urlparse.parse_qs(q)['tag'][0]
     h_url = 'https://hypothes.is/api/search?tags=' + tag
     s = urllib2.urlopen(h_url).read()
