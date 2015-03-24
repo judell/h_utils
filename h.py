@@ -67,12 +67,12 @@ def make_activity(j):
 
 def make_feed(j, tag):
     host = 'http://wiki.elmcity.info:8080/'
-    url = host + '?tag=' + tag
+    url = host + '?method=feed&tag=' + tag
     rows = j['rows']
     fg = FeedGenerator()
     fg.title('h stream for tag ' + tag)
     fg.description('desc')
-    fg.link(href='%s' % (url) , rel='self')
+    fg.link(href='%s' % (url), rel='self')
     fg.id(url)
     for r in rows:
         fe = fg.add_entry()
@@ -80,7 +80,7 @@ def make_feed(j, tag):
         fe.title(r['uri'])
         fe.link(href="%s" % r['uri'])
         fe.author({'name':'h'})
-        fe.content('tagged item')
+        fe.content(r['uri'])
     return fg.atom_str(pretty=True)
 
 def add_or_increment(dict, key):
