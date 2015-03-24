@@ -12,7 +12,7 @@ class GetHandler(BaseHTTPRequestHandler):
         parsed_path = urlparse.urlparse(self.path)
         q = parsed_path.query
         method = urlparse.parse_qs(q)['method'][0]
-        if method == 'json2rss':
+        if method == 'feed':
             self.wfile.write(json2atom(q))
             return;
         if method == 'activity':
