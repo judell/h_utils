@@ -100,7 +100,6 @@ def make_user_urls(j, user):
     texts = {}
     titles = {}
     datetimes = {}
-    tags = {}
     s = '<h1>urls annotated by %s</h1>' % user
     for row in j['rows']:
         url = row['uri'].replace('https://via.hypothes.is/h/','')
@@ -117,15 +116,17 @@ def make_user_urls(j, user):
         except:
             titles[url] = url # it's a reply?
         try:
-            text = row['text']
-            if len(text):
-                add_or_append(texts, url, text)
-        except:
-            pass
-        try:
             if len(row['tags']):
-                for t in row['tags']:
-                    add_or_append(tags, url, t)
+                tags = ', '.join(row['tags'])
+                tags = '<i>(tags: %s)</i>' % tags
+            else:
+                tags = ''
+            selector = row['target'][0]['selector']
+            for sel in selector:
+                if sel.has_key('exact'):
+                    target = sel['exact'].decode('utf-8')
+                    text = row['text'].decode('utf-8')
+                    add_or_append(texts, url, (target,text,tags))
         except:
             pass
 
@@ -134,14 +135,16 @@ def make_user_urls(j, user):
     for tuple in date_ordered_urls:
         url = tuple[0]
         dt = tuple[1]
-        taglist = '</i>, <i>'.join(tags[url])  if tags.has_key(url) else ''
         when = dt[0:16].replace('T',' ')
-        s += '<p><b><span style="font-size:smaller">%s</span></b> <a href="https://via.hypothes.is/h/%s">%s</a> <i>%s</i></p>' % (when, url, titles[url], taglist)
+        s += '<p><b><span style="font-size:smaller">%s</span></b> <a href="https://via.hypothes.is/h/%s">%s</a></p>' % (when, url, titles[url])
         if texts.has_key(url):
             list_of_texts = texts[url]
             list_of_texts.reverse()
-            for text in list_of_texts: 
-                s += '<blockquote>%s</blockquote>' % text
+            for target_and_text_and_tags in list_of_texts: 
+                target = target_and_text_and_tags[0]
+                text = target_and_text_and_tags[1]
+                tags = target_and_text_and_tags[2]
+                s += '<blockquote><i>%s</i></blockquote><blockquote style="margin-left:10%%">%s %s</blockquote>' % (target,text, tags)
     s = """<html>
 <head>
 <style>
@@ -171,8 +174,8 @@ def add_or_append(dict, key, val):
 
 if __name__ == '__main__':
     from BaseHTTPServer import HTTPServer
-#    server = HTTPServer(('h.jonudell.info', 8080), GetHandler)
-    server = HTTPServer(('', 8080), GetHandler)
+    server = HTTPServer(('h.jonudell.info', 8080), GetHandler)
+#    server = HTTPServer(('', 8080), GetHandler)
     print 'Starting server, use <Ctrl-C> to stop'
     server.serve_forever()
 
