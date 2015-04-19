@@ -107,9 +107,9 @@ def make_user_urls(j, user):
         if url.startswith('urn:'):
             continue
         add_or_increment(urls, url)
-        datetimes[url] = row['updated']
+        datetimes[url] = row['created']
         try:
-            title = row['document']['title']
+            title = row['document']['title'].decode('utf-8')
             if ( isinstance(title, list)):
                 titles[url] = title[0]
             else:
@@ -129,12 +129,14 @@ def make_user_urls(j, user):
         except:
             pass
 
-    date_ordered_urls = datetimes.keys()
-    date_ordered_urls.reverse()
+    date_ordered_urls = sorted(datetimes.items(), key=operator.itemgetter(1,0), reverse=True)
 
-    for url in date_ordered_urls:
+    for tuple in date_ordered_urls:
+        url = tuple[0]
+        dt = tuple[1]
         taglist = '</i>, <i>'.join(tags[url])  if tags.has_key(url) else ''
-        s += '<p><a href="https://via.hypothes.is/h/%s">%s</a> <i>%s</i></p>' % ( url, titles[url], taglist)
+        when = dt[0:16].replace('T',' ')
+        s += '<p><b><span style="font-size:smaller">%s</span></b> <a href="https://via.hypothes.is/h/%s">%s</a> <i>%s</i></p>' % (when, url, titles[url], taglist)
         if texts.has_key(url):
             list_of_texts = texts[url]
             list_of_texts.reverse()
