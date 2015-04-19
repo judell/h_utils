@@ -1,8 +1,13 @@
-import json, urllib2
+import json, urllib2, re
 from feedgen.feed import FeedGenerator
 
 from BaseHTTPServer import BaseHTTPRequestHandler
 import urlparse, operator
+
+host = 'h.jonudell.info'
+#host = 'localhost'
+port = 8080
+host_port = 'http://' + host + ':' + str(port)
 
 class GetHandler(BaseHTTPRequestHandler):
     
@@ -70,7 +75,10 @@ def make_activity(j):
 
     s += '<p>users: %s</p>' % len(users)
     for user in users:
-        s += '<div>%s: %s</div>' % (user[0], user[1])
+        uname = re.sub('.+\\:','',user[0])
+        uname = re.sub('@.+','',uname)
+        url = host_port + '/?method=user_urls&user=' + uname
+        s += '<div><a target="user activity" title="see annotation activity" href="%s">%s</a>: %s</div>' % (url, uname, user[1])
 
     s += '<p>details</p>'
     s += details
@@ -78,8 +86,7 @@ def make_activity(j):
 
 
 def make_feed(j, tag):
-    host = 'http://wiki.elmcity.info:8080/'
-    url = host + '?method=feed&tag=' + tag
+    url = host_port + '?method=feed&tag=' + tag
     rows = j['rows']
     fg = FeedGenerator()
     fg.title('h stream for tag ' + tag)
@@ -174,8 +181,7 @@ def add_or_append(dict, key, val):
 
 if __name__ == '__main__':
     from BaseHTTPServer import HTTPServer
-    server = HTTPServer(('h.jonudell.info', 8080), GetHandler)
-#    server = HTTPServer(('', 8080), GetHandler)
+    server = HTTPServer((host, port), GetHandler)
     print 'Starting server, use <Ctrl-C> to stop'
     server.serve_forever()
 
