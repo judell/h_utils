@@ -17,8 +17,11 @@ class GetHandler(BaseHTTPRequestHandler):
         parsed_path = urlparse.urlparse(self.path)
         q = parsed_path.query
         method = urlparse.parse_qs(q)['method'][0]
-        if method == 'feed':
-            self.wfile.write(json2atom(q))
+        if method == 'feed':  # default is by tag
+            self.wfile.write(_feed(q, 'tag'))
+            return;
+        if method == 'urlfeed':
+            self.wfile.write(_feed(q, 'url'))
             return;
         if method == 'activity':
             self.wfile.write(activity(q))
@@ -28,12 +31,15 @@ class GetHandler(BaseHTTPRequestHandler):
             return;
 
 
-def json2atom(q):
-    tag = urlparse.parse_qs(q)['tag'][0]
-    h_url = 'https://hypothes.is/api/search?tags=' + tag
+def _feed(q,facet):
+    value = urlparse.parse_qs(q)[facet][0]
+    if facet == 'tag':
+        h_url = 'https://hypothes.is/api/search?tags=' + value
+    if facet == 'url':
+        h_url = 'https://hypothes.is/api/search?uri=' + value
     s = urllib2.urlopen(h_url).read()
     j = json.loads(s)
-    return make_feed(j, tag)
+    return make_feed(j, facet, value)
 
 def activity(q):
     h_url = 'https://hypothes.is/api/search?limit=1000'
@@ -49,7 +55,6 @@ def user_urls(q):
     j = json.loads(s)
     return make_user_urls(j, user)
     
-
 def make_activity(j):
     users = {}
     days = {}
@@ -85,22 +90,28 @@ def make_activity(j):
     s += details
     return s
 
-
-def make_feed(j, tag):
-    url = host_port + '?method=feed&tag=' + tag
+def make_feed(j, facet,  value):
+    url = host_port
+    if facet == 'tag':
+        url += '?method=feed&tag=' + value
+    if facet == 'url':
+        url += '?method=feed&' + facet + '=' + value
     rows = j['rows']
     fg = FeedGenerator()
-    fg.title('h stream for tag ' + tag)
+    fg.title('h stream for ' + facet + ' ' + value)
     fg.description('desc')
     fg.link(href='%s' % (url), rel='self')
     fg.id(url)
     for r in rows:
         fe = fg.add_entry()
-        fe.id(r['uri'])
+        fe.id(r['id'])
         fe.title(r['uri'])
-        fe.link(href="%s" % r['uri'])
+        fe.link(href="https://hypothes.is/a/%s" % r['id'])
         fe.author({'name':'h'})
-        fe.content(r['uri'])
+        if r.has_key('text'):
+            fe.content(r['text'])
+        else:
+            fe.content(r['uri'])
     return fg.atom_str(pretty=True)
 
 def make_user_urls(j, user):
@@ -180,8 +191,20 @@ def add_or_append(dict, key, val):
         dict[key] = [val]
     return dict
     
+
 if __name__ == '__main__':
     from BaseHTTPServer import HTTPServer
     server = HTTPServer((host, port), GetHandler)
     print 'Starting server, use <Ctrl-C> to stop'
     server.serve_forever()
+
+####
+for row in j['rows']:
+  uri = row['uri'].replace('https://via.hypothes.is/h/','')
+  add_or_increment(urls, uri)
+
+ 
+
+
+  
+ 
