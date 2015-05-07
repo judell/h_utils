@@ -1,11 +1,11 @@
-import json, urllib2, re
+import json, urllib2, re, chardet
 from feedgen.feed import FeedGenerator
 
 from BaseHTTPServer import BaseHTTPRequestHandler
 import urlparse, operator
 
-host = 'h.jonudell.info'
 #host = 'localhost'
+host = 'h.jonudell.info'
 port = 8080
 host_port = 'http://' + host + ':' + str(port)
 
@@ -45,6 +45,7 @@ def user_urls(q):
     user = urlparse.parse_qs(q)['user'][0]
     h_url = 'https://hypothes.is/api/search?limit=1000&user=' + user
     s = urllib2.urlopen(h_url).read()
+    s = s.decode('utf-8')
     j = json.loads(s)
     return make_user_urls(j, user)
     
@@ -55,7 +56,7 @@ def make_activity(j):
     details = ''
     rows = j['rows']
     for row in rows:
-        created = row['created'][0:19]
+        created = row['updated'][0:19]
         day = created[0:10]
         days = add_or_increment(days,day)
         user = row['user']
@@ -78,7 +79,7 @@ def make_activity(j):
         uname = re.sub('.+\\:','',user[0])
         uname = re.sub('@.+','',uname)
         url = host_port + '/?method=user_urls&user=' + uname
-        s += '<div><a target="user activity" title="see annotation activity" href="%s">%s</a>: %s</div>' % (url, uname, user[1])
+        s += '<div><a target="_new" title="see annotation activity" href="%s">%s</a>: %s</div>' % (url, uname, user[1])
 
     s += '<p>details</p>'
     s += details
@@ -109,13 +110,13 @@ def make_user_urls(j, user):
     datetimes = {}
     s = '<h1>urls annotated by %s</h1>' % user
     for row in j['rows']:
-        url = row['uri'].replace('https://via.hypothes.is/h/','')
+        url = row['uri'].replace('https://via.hypothes.is/h/','').replace('https://via.hypothes.is/','')
         if url.startswith('urn:'):
             continue
         add_or_increment(urls, url)
-        datetimes[url] = row['created']
+        datetimes[url] = row['updated']
         try:
-            title = row['document']['title'].decode('utf-8')
+            title = row['document']['title']
             if ( isinstance(title, list)):
                 titles[url] = title[0]
             else:
@@ -131,8 +132,9 @@ def make_user_urls(j, user):
             selector = row['target'][0]['selector']
             for sel in selector:
                 if sel.has_key('exact'):
-                    target = sel['exact'].decode('utf-8')
-                    text = row['text'].decode('utf-8')
+                    target = sel['exact']
+                    text = row['text']
+                    text = re.sub('\n+','<p>', text)
                     add_or_append(texts, url, (target,text,tags))
         except:
             pass
@@ -143,7 +145,7 @@ def make_user_urls(j, user):
         url = tuple[0]
         dt = tuple[1]
         when = dt[0:16].replace('T',' ')
-        s += '<p><b><span style="font-size:smaller">%s</span></b> <a href="https://via.hypothes.is/h/%s">%s</a></p>' % (when, url, titles[url])
+        s += '<p><b><span style="font-size:smaller">%s</span></b> <a target="_new" href="https://via.hypothes.is/h/%s">%s</a></p>' % (when, url, titles[url])
         if texts.has_key(url):
             list_of_texts = texts[url]
             list_of_texts.reverse()
@@ -178,20 +180,8 @@ def add_or_append(dict, key, val):
         dict[key] = [val]
     return dict
     
-
 if __name__ == '__main__':
     from BaseHTTPServer import HTTPServer
     server = HTTPServer((host, port), GetHandler)
     print 'Starting server, use <Ctrl-C> to stop'
     server.serve_forever()
-
-####
-for row in j['rows']:
-  uri = row['uri'].replace('https://via.hypothes.is/h/','')
-  add_or_increment(urls, uri)
-
- 
-
-
-  
- 
