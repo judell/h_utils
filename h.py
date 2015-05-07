@@ -11,6 +11,12 @@ host_port = 'http://' + host + ':' + str(port)
 
 class GetHandler(BaseHTTPRequestHandler):
     
+    def do_headers(self, mime_type, body):
+        self.send_response(200)
+        self.send_header(  'Content-Type' , mime_type )
+        self.send_header(  'Content-Length' , str(len(body)) )
+        self.end_headers()
+
     def do_GET(self):
         if not "method=" in self.path:
             return    
@@ -18,16 +24,24 @@ class GetHandler(BaseHTTPRequestHandler):
         q = parsed_path.query
         method = urlparse.parse_qs(q)['method'][0]
         if method == 'feed':  # default is by tag
-            self.wfile.write(_feed(q, 'tag'))
+            body = _feed(q, 'tag')
+            self.do_headers('application/xml; charset=UTF-8', body)
+            self.wfile.write(body)
             return;
         if method == 'urlfeed':
-            self.wfile.write(_feed(q, 'url'))
+            body = _feed(q, 'url')
+            self.do_headers('application/xml; charset=UTF-8', body)
+            self.wfile.write(body)
             return;
         if method == 'activity':
-            self.wfile.write(activity(q))
+            body = activity(q)
+            self.do_headers('text/html; charset=UTF-8', body)
+            self.wfile.write(body)
             return;
         if method == 'user_urls':
-            self.wfile.write(user_urls(q))
+            body = user_urls(q)
+            self.do_headers('text/html; charset=UTF-8', body)
+            self.wfile.write(body)
             return;
 
 
@@ -38,6 +52,7 @@ def _feed(q,facet):
     if facet == 'url':
         h_url = 'https://hypothes.is/api/search?uri=' + value
     s = urllib2.urlopen(h_url).read()
+    s = s.decode('utf-8')
     j = json.loads(s)
     return make_feed(j, facet, value)
 
@@ -91,7 +106,7 @@ def make_activity(j):
     return s
 
 def make_feed(j, facet,  value):
-    url = host_port
+    url = host_port + '/'
     if facet == 'tag':
         url += '?method=feed&tag=' + value
     if facet == 'url':
@@ -104,15 +119,16 @@ def make_feed(j, facet,  value):
     fg.id(url)
     for r in rows:
         fe = fg.add_entry()
-        fe.id(r['id'])
         fe.title(r['uri'])
         fe.link(href="https://hypothes.is/a/%s" % r['id'])
-        fe.author({'name':'h'})
+        fe.id("https://hypothes.is/a/%s" % r['id'])
+        fe.author({'name': r['user']})
         if r.has_key('text'):
-            fe.content(r['text'])
+            fe.content(r['user'] + ": " + r['text'])
         else:
-            fe.content(r['uri'])
-    return fg.atom_str(pretty=True)
+            fe.content(r['user'] + ": " + r['uri'])
+    str = fg.atom_str(pretty=True)
+    return str.encode('utf-8')
 
 def make_user_urls(j, user):
     urls = {}
