@@ -1,4 +1,5 @@
-import json, urllib2, re, chardet
+import json, urllib2, re, chardet, traceback
+from datetime import datetime
 from feedgen.feed import FeedGenerator
 
 from BaseHTTPServer import BaseHTTPRequestHandler
@@ -38,12 +39,11 @@ class GetHandler(BaseHTTPRequestHandler):
             self.do_headers('text/html; charset=UTF-8', body)
             self.wfile.write(body)
             return;
-        if method == 'user_urls':
-            body = user_urls(q)
+        if method == 'user_widget':
+            body = user_widget(q)
             self.do_headers('text/html; charset=UTF-8', body)
             self.wfile.write(body)
             return;
-
 
 def _feed(q,facet):
     value = urlparse.parse_qs(q)[facet][0]
@@ -62,14 +62,48 @@ def activity(q):
     j = json.loads(s)
     return make_activity(j)
 
-def user_urls(q):
+def user_widget(q):
     user = urlparse.parse_qs(q)['user'][0]
-    h_url = 'https://hypothes.is/api/search?limit=1000&user=' + user
+    h_url = 'https://hypothes.is/api/search?limit=200&user=' + user
     s = urllib2.urlopen(h_url).read()
     s = s.decode('utf-8')
     j = json.loads(s)
-    return make_user_urls(j, user)
-    
+    return make_user_widget(j, user, 15)
+
+def friendly_time(dt):
+    now = datetime.now()
+    delta = now - dt
+
+    minute = 60
+    hour = minute * 60
+    day = hour * 24
+    month = day * 30
+    year = day * 365
+
+    diff = delta.seconds + (delta.days * day)
+
+    if diff < 10:
+        return "just now"
+    if diff < minute:
+        return str(diff) + " seconds ago"
+    if diff < 2 * minute:
+        return "a minute ago"
+    if diff < hour:
+        return str(diff / minute) + " minutes ago"
+    if diff < 2 * hour:
+        return "an hour ago"
+    if diff < day:
+        return str(diff / hour) + " hours ago"
+    if diff < 2 * day:
+        return "a day ago"
+    if diff < month:
+        return str(diff / day) + " days ago"
+    if diff < 2 * month:
+        return "a month ago"
+    if diff < year:
+        return str(diff / month) + " months ago"
+    return str(diff / year) + " years ago"
+
 def make_activity(j):
     users = {}
     days = {}
@@ -98,7 +132,7 @@ def make_activity(j):
     for user in users:
         uname = re.sub('.+\\:','',user[0])
         uname = re.sub('@.+','',uname)
-        url = host_port + '/?method=user_urls&user=' + uname
+        url = host_port + '/?method=user_widget&user=' + uname
         s += '<div><a target="_new" title="see annotation activity" href="%s">%s</a>: %s</div>' % (url, uname, user[1])
 
     s += '<p>details</p>'
@@ -130,17 +164,16 @@ def make_feed(j, facet,  value):
     str = fg.atom_str(pretty=True)
     return str.encode('utf-8')
 
-def make_user_urls(j, user):
-    urls = {}
+def get_user_activity(j, user):
     texts = {}
     titles = {}
     datetimes = {}
-    s = '<h1>urls annotated by %s</h1>' % user
+    
     for row in j['rows']:
         url = row['uri'].replace('https://via.hypothes.is/h/','').replace('https://via.hypothes.is/','')
         if url.startswith('urn:'):
             continue
-        add_or_increment(urls, url)
+        #add_or_increment(urls, url)
         datetimes[url] = row['updated']
         try:
             title = row['document']['title']
@@ -150,29 +183,47 @@ def make_user_urls(j, user):
                 titles[url] = title
         except:
             titles[url] = url # it's a reply?
+        tag_html = ''
         try:
             if len(row['tags']):
-                tags = ', '.join(row['tags'])
-                tags = '<i>(tags: %s)</i>' % tags
-            else:
-                tags = ''
+                tag_items = []
+                for tag in row['tags']:
+                    tag_items.append('<li><span class="tag-item">%s</span></li>' % tag)
+                tag_html = '<ul>%s</ul>' % '\n'.join(tag_items)
+            if row.has_key('target') is False:
+                continue
+            if len(row['target']) == 0:
+                continue
             selector = row['target'][0]['selector']
             for sel in selector:
                 if sel.has_key('exact'):
                     target = sel['exact']
                     text = row['text']
                     text = re.sub('\n+','<p>', text)
-                    add_or_append(texts, url, (target,text,tags))
+                    img_pat = '!\[Image Description\]\(([^\)]+)\)'
+                    text = re.sub(img_pat, r'<img src="\1">', text)
+                    url_pat = '\[([^\]]+)\]\(([^\)]+)\)'
+                    text = re.sub(url_pat, r'<a href="\2">\1</a>', text)
+                    add_or_append(texts, url, (target,text,tag_html))
         except:
-            pass
+            print traceback.format_exc()
+    return datetimes, texts, titles
+
+def make_user_widget(j, user, limit):
+    
+    datetimes, texts, titles = get_user_activity(j, user)
 
     date_ordered_urls = sorted(datetimes.items(), key=operator.itemgetter(1,0), reverse=True)
+    
+    s = '<h1>Hypothesis activity for %s</h1>' % user
 
-    for tuple in date_ordered_urls:
+    for tuple in date_ordered_urls[0:limit]:
         url = tuple[0]
-        dt = tuple[1]
-        when = dt[0:16].replace('T',' ')
-        s += '<p><b><span style="font-size:smaller">%s</span></b> <a target="_new" href="https://via.hypothes.is/h/%s">%s</a></p>' % (when, url, titles[url])
+        dt_str = tuple[1]
+        dt = datetime.strptime(dt_str[0:16], "%Y-%m-%dT%H:%M")
+        #when = dt.strftime('%d %b %Y %H:%M')
+        when = friendly_time(dt)
+        s += '<div class="stream-url"><a target="_new" class="ng-binding" href="https://via.hypothes.is/%s">%s</a> <span class="annotation-timestamp small pull-right ng-binding ng-scope">%s</span> </div>' % (url, titles[url], when)
         if texts.has_key(url):
             list_of_texts = texts[url]
             list_of_texts.reverse()
@@ -180,13 +231,29 @@ def make_user_urls(j, user):
                 target = target_and_text_and_tags[0]
                 text = target_and_text_and_tags[1]
                 tags = target_and_text_and_tags[2]
-                s += '<blockquote><i>%s</i></blockquote><blockquote style="margin-left:10%%">%s %s</blockquote>' % (target,text, tags)
+                s += '<div class="stream-quote"><span class="annotation-quote">%s</span></div><div class="stream-comment">%s</div>' % (target,text)
+                if tags != '':
+                    s += '<div class="stream-tags">%s</div>' % tags
     s = """<html>
 <head>
-<style>
-body { font-family: verdana; margin: .5in }
-</style>
-<body>
+ <link rel="stylesheet" href="https://hypothes.is/assets/styles/app.min.css" />
+ <link rel="stylesheet" href="https://hypothes.is/assets/styles/hypothesis.min.css" />
+ <style>
+ body { padding: 10px; font-size: 8.5pt }
+ h1 { font-weight: bold; margin-bottom:10pt }
+ .stream-quote { margin-bottom: 4pt; }
+ .stream-url { margin-bottom: 4pt; overflow:hidden}
+ .stream-comment { margin-bottom: 4pt; margin-left:10%%; word-wrap: break-word }
+ .stream-tags { margin-left: 10%%; margin-bottom: 4pt }
+ .annotation-quote { padding: 0 }
+ ul, li { display: inline }
+ li { color: #969696; font-size: smaller; border: 1px solid #d3d3d3; border-radius: 2px; padding: 0 .4545em .1818em }
+ img { max-width: 100%% }
+ annotation-timestamp { margin-right: 20px }
+ img { padding:10px }
+ a { word-wrap: break-word }
+ </style>
+<body class="ng-scope">
 %s
 </body>
 </html>
