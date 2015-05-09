@@ -1,3 +1,13 @@
+"""
+/?method=activity
+
+/?method=feed&tag=[TAG]
+
+/?method=urlfeed&url=[URL]
+
+/?method=user_widget&user=[USER]
+"""
+
 import json, urllib2, re, chardet, traceback
 from datetime import datetime
 from feedgen.feed import FeedGenerator
