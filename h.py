@@ -54,6 +54,49 @@ class GetHandler(BaseHTTPRequestHandler):
             self.do_headers('text/html; charset=UTF-8', body)
             self.wfile.write(body)
             return;
+        if method == 'multi_tag':
+            body = multi_tag(q)
+            self.do_headers('text/html; charset=UTF-8', body)
+            self.wfile.write(body)
+            return;
+
+def multi_tag(q):
+    tags = urlparse.parse_qs(q)['tags'][0]
+    tags = tags.split(',')
+    tags = [t.strip() for t in tags]
+    args = ['tags=' + a for a in tags]
+    args = '&'.join(args)
+    h_url = 'https://hypothes.is/api/search?' + args
+    s = urllib2.urlopen(h_url).read()
+    j = json.loads(s)
+    return make_multi_tag(j,tags)
+
+def make_multi_tag(j,tags):
+    rows = j['rows']
+    tmpl = """<html>
+<head>
+ <style>
+ body { font-family:verdana;margin:.5in }
+ h1 { font-weight: bold; margin-bottom:10pt }
+ p.attribution { font-size: smaller; }
+ </style>
+<body>%s</body>
+</html>
+""" 
+    s = '<h1>Search for tags: ' + ','.join(tags) + '</h1>'
+    s += '<h2>found ' + str(len(rows)) + '</h2><hr>'
+    for row in rows:
+        updated = row['updated'][0:19]
+        user = row['user'].replace('acct:','').replace('@hypothes.is','')
+        uri = row['uri']
+        text = row['text']
+        tags = row['tags']
+        s += '<p><a href="%s">%s</a></p>' % ( uri, uri)
+        s += '<p>%s</p>' % text
+        s += '<p class="attribution">%s - %s - %s</p>' % ( user, updated, ','.join(tags))
+        s += '<hr>'
+    return tmpl % s
+
 
 def _feed(q,facet):
     value = urlparse.parse_qs(q)[facet][0]
@@ -181,8 +224,8 @@ def get_user_activity(j, user):
     
     for row in j['rows']:
         url = row['uri'].replace('https://via.hypothes.is/h/','').replace('https://via.hypothes.is/','')
-        if url.startswith('urn:'):
-            continue
+        #if url.startswith('urn:'):
+        #    continue
         #add_or_increment(urls, url)
         datetimes[url] = row['updated']
         try:
@@ -249,7 +292,7 @@ def make_user_widget(j, user, limit):
  <link rel="stylesheet" href="https://hypothes.is/assets/styles/app.min.css" />
  <link rel="stylesheet" href="https://hypothes.is/assets/styles/hypothesis.min.css" />
  <style>
- body { padding: 10px; font-size: 8.5pt }
+ body { padding: 10px; font-size: 10pt }
  h1 { font-weight: bold; margin-bottom:10pt }
  .stream-quote { margin-bottom: 4pt; }
  .stream-url { margin-bottom: 4pt; overflow:hidden}
