@@ -93,7 +93,8 @@ def make_multi_tag(j,tags):
         tags = row['tags']
         s += '<p><a href="%s">%s</a></p>' % ( uri, uri)
         s += '<p>%s</p>' % text
-        s += '<p class="attribution">%s - %s - %s</p>' % ( user, updated, ','.join(tags))
+        tags = ['<a href="http://h.jonudell.info:8080/?method=multi_tag&tags=' + t + '">' + t + '</a>' for t in tags]
+        s += '<p class="attribution">%s - %s - %s</p>' % ( user, updated, ', '.join(tags))
         s += '<hr>'
     return tmpl % s
 
