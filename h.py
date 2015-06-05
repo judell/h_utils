@@ -8,15 +8,16 @@
 /?method=user_widget&user=[USER]
 """
 
-import json, urllib2, re, chardet, traceback
+import json, urllib, urllib2, re, chardet, traceback, types
+from collections import defaultdict
 from datetime import datetime
 from feedgen.feed import FeedGenerator
 
 from BaseHTTPServer import BaseHTTPRequestHandler
 import urlparse, operator
 
-#host = 'localhost'
-host = 'h.jonudell.info'
+host = 'localhost'
+#host = 'h.jonudell.info'
 port = 8080
 host_port = 'http://' + host + ':' + str(port)
 
@@ -34,7 +35,7 @@ class GetHandler(BaseHTTPRequestHandler):
         parsed_path = urlparse.urlparse(self.path)
         q = parsed_path.query
         method = urlparse.parse_qs(q)['method'][0]
-        if method == 'feed':  # default is by tag
+        if method == 'feed':
             body = _feed(q, 'tag')
             self.do_headers('application/xml; charset=UTF-8', body)
             self.wfile.write(body)
@@ -64,9 +65,10 @@ def multi_tag(q):
     tags = urlparse.parse_qs(q)['tags'][0]
     tags = tags.split(',')
     tags = [t.strip() for t in tags]
+    tags = [urllib.quote(t) for t in tags]
     args = ['tags=' + a for a in tags]
     args = '&'.join(args)
-    h_url = 'https://hypothes.is/api/search?' + args
+    h_url = 'https://hypothes.is/api/search?limit=200&' + args
     s = urllib2.urlopen(h_url).read()
     j = json.loads(s)
     return make_multi_tag(j,tags)
@@ -93,10 +95,10 @@ def make_multi_tag(j,tags):
         tags = row['tags']
         s += '<p><a href="%s">%s</a></p>' % ( uri, uri)
         s += '<p>%s</p>' % text
-        tags = ['<a href="http://h.jonudell.info:8080/?method=multi_tag&tags=' + t + '">' + t + '</a>' for t in tags]
+        tags = ['<a href="' + host_port + '/?method=multi_tag&tags=' + urllib.quote(t) + '">' + t + '</a>' for t in tags]
         s += '<p class="attribution">%s - %s - %s</p>' % ( user, updated, ', '.join(tags))
         s += '<hr>'
-    return tmpl % s
+    return (tmpl % s).encode('UTF-8')
 
 
 def _feed(q,facet):
@@ -159,16 +161,16 @@ def friendly_time(dt):
     return str(diff / year) + " years ago"
 
 def make_activity(j):
-    users = {}
-    days = {}
+    users = defaultdict(int)
+    days = defaultdict(int)
     details = ''
     rows = j['rows']
     for row in rows:
         created = row['updated'][0:19]
         day = created[0:10]
-        days = add_or_increment(days,day)
+        days[day] += 1
         user = row['user']
-        users = add_or_increment(users,user)
+        users[user] += 1
         uri = row['uri']
         details += '<div>created %s user %s uri %s</div>' % ( created, user, uri)
 
@@ -206,15 +208,30 @@ def make_feed(j, facet,  value):
     fg.link(href='%s' % (url), rel='self')
     fg.id(url)
     for r in rows:
+        user = r['user'].replace('acct:','').replace('@hypothes.is','')
+        uri = r['uri']
+        if r['uri'].startswith('urn:x-pdf') and r.has_key('document'):
+            if r['document'].has_key('link'):
+                uri = r['document']['link'][-1]['href']
+        if r.has_key('document') and r['document'].has_key('title'):
+            t = r['document']['title']
+            if isinstance(t, types.ListType) and len(t):
+                doc_title = t[0]
+            else:
+                doc_title = t
+        else:
+            doc_title = uri
+        doc_title = doc_title.replace('"',"'")
+        title = 'note by %s on "%s" (%s)' % ( user, doc_title, uri )
         fe = fg.add_entry()
-        fe.title(r['uri'])
+        fe.title(title)
         fe.link(href="https://hypothes.is/a/%s" % r['id'])
         fe.id("https://hypothes.is/a/%s" % r['id'])
         fe.author({'name': r['user']})
+        content = title
         if r.has_key('text'):
-            fe.content(r['user'] + ": " + r['text'])
-        else:
-            fe.content(r['user'] + ": " + r['uri'])
+            content += ': ' + r['text']
+        fe.content(content)
     str = fg.atom_str(pretty=True)
     return str.encode('utf-8')
 
@@ -314,13 +331,6 @@ def make_user_widget(j, user, limit):
 """ % (s)
     return s.encode('utf-8')
 
-def add_or_increment(dict, key):
-    if dict.has_key(key):
-        dict[key] += 1
-    else:
-        dict[key] = 1
-    return dict
-
 def add_or_append(dict, key, val):
     if dict.has_key(key):
         dict[key].append(val)
@@ -335,10 +345,6 @@ if __name__ == '__main__':
     print 'Starting server, use <Ctrl-C> to stop'
     server.serve_forever()
 
-####
-for row in j['rows']:
-  uri = row['uri'].replace('https://via.hypothes.is/h/','')
-  add_or_increment(urls, uri)
 
  
 
