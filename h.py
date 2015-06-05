@@ -9,6 +9,7 @@
 """
 
 import json, urllib, urllib2, re, chardet, traceback, types
+from Hypothesis import Hypothesis
 from collections import defaultdict
 from datetime import datetime
 from feedgen.feed import FeedGenerator
@@ -208,20 +209,10 @@ def make_feed(j, facet,  value):
     fg.link(href='%s' % (url), rel='self')
     fg.id(url)
     for r in rows:
-        user = r['user'].replace('acct:','').replace('@hypothes.is','')
-        uri = r['uri']
-        if r['uri'].startswith('urn:x-pdf') and r.has_key('document'):
-            if r['document'].has_key('link'):
-                uri = r['document']['link'][-1]['href']
-        if r.has_key('document') and r['document'].has_key('title'):
-            t = r['document']['title']
-            if isinstance(t, types.ListType) and len(t):
-                doc_title = t[0]
-            else:
-                doc_title = t
-        else:
-            doc_title = uri
-        doc_title = doc_title.replace('"',"'")
+        info = Hypothesis.get_user_uri_doctitle_from_row(r)
+        user = info['user']
+        uri = info['uri']
+        doc_title = info['doc_title']
         title = 'note by %s on "%s" (%s)' % ( user, doc_title, uri )
         fe = fg.add_entry()
         fe.title(title)
