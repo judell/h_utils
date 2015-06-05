@@ -6,6 +6,8 @@
 /?method=urlfeed&url=[URL]
 
 /?method=user_widget&user=[USER]
+
+/?method=multi_tag&tags=[TAG1,TAG2]
 """
 
 import json, urllib, urllib2, re, chardet, traceback, types
@@ -127,52 +129,19 @@ def user_widget(q):
     j = json.loads(s)
     return make_user_widget(j, user, 15)
 
-def friendly_time(dt):
-    now = datetime.now()
-    delta = now - dt
-
-    minute = 60
-    hour = minute * 60
-    day = hour * 24
-    month = day * 30
-    year = day * 365
-
-    diff = delta.seconds + (delta.days * day)
-
-    if diff < 10:
-        return "just now"
-    if diff < minute:
-        return str(diff) + " seconds ago"
-    if diff < 2 * minute:
-        return "a minute ago"
-    if diff < hour:
-        return str(diff / minute) + " minutes ago"
-    if diff < 2 * hour:
-        return "an hour ago"
-    if diff < day:
-        return str(diff / hour) + " hours ago"
-    if diff < 2 * day:
-        return "a day ago"
-    if diff < month:
-        return str(diff / day) + " days ago"
-    if diff < 2 * month:
-        return "a month ago"
-    if diff < year:
-        return str(diff / month) + " months ago"
-    return str(diff / year) + " years ago"
-
 def make_activity(j):
     users = defaultdict(int)
     days = defaultdict(int)
     details = ''
     rows = j['rows']
     for row in rows:
+        info = Hypothesis.get_info_from_row(row)
         created = row['updated'][0:19]
         day = created[0:10]
         days[day] += 1
-        user = row['user']
+        user = info['user']
         users[user] += 1
-        uri = row['uri']
+        uri = info['uri']
         details += '<div>created %s user %s uri %s</div>' % ( created, user, uri)
 
     days = sorted(days.items(), key=operator.itemgetter(0,1), reverse=True)
@@ -209,7 +178,7 @@ def make_feed(j, facet,  value):
     fg.link(href='%s' % (url), rel='self')
     fg.id(url)
     for r in rows:
-        info = Hypothesis.get_user_uri_doctitle_from_row(r)
+        info = Hypothesis.get_info_from_row(r)
         user = info['user']
         uri = info['uri']
         doc_title = info['doc_title']
@@ -219,9 +188,11 @@ def make_feed(j, facet,  value):
         fe.link(href="https://hypothes.is/a/%s" % r['id'])
         fe.id("https://hypothes.is/a/%s" % r['id'])
         fe.author({'name': r['user']})
-        content = title
+        content = ''
         if r.has_key('text'):
             content += ': ' + r['text']
+        if r.has_key('tags'):
+            content += ' [tags: %s]' % ','.join(r['tags'])
         fe.content(content)
     str = fg.atom_str(pretty=True)
     return str.encode('utf-8')
@@ -232,22 +203,15 @@ def get_user_activity(j, user):
     datetimes = {}
     
     for row in j['rows']:
-        url = row['uri'].replace('https://via.hypothes.is/h/','').replace('https://via.hypothes.is/','')
-        #if url.startswith('urn:'):
-        #    continue
-        #add_or_increment(urls, url)
+        info = Hypothesis.get_info_from_row(row)
+        url = info['uri'].replace('https://via.hypothes.is/h/','').replace('https://via.hypothes.is/','')
         datetimes[url] = row['updated']
-        try:
-            title = row['document']['title']
-            if ( isinstance(title, list)):
-                titles[url] = title[0]
-            else:
-                titles[url] = title
-        except:
-            titles[url] = url # it's a reply?
+        titles[url] = info['doc_title']
+        tags = info['tags']
+        text = info['text']
         tag_html = ''
         try:
-            if len(row['tags']):
+            if len(tags):
                 tag_items = []
                 for tag in row['tags']:
                     tag_items.append('<li><span class="tag-item">%s</span></li>' % tag)
@@ -260,7 +224,7 @@ def get_user_activity(j, user):
             for sel in selector:
                 if sel.has_key('exact'):
                     target = sel['exact']
-                    text = row['text']
+                    text = info['text']
                     text = re.sub('\n+','<p>', text)
                     img_pat = '!\[Image Description\]\(([^\)]+)\)'
                     text = re.sub(img_pat, r'<img src="\1">', text)
@@ -284,7 +248,7 @@ def make_user_widget(j, user, limit):
         dt_str = tuple[1]
         dt = datetime.strptime(dt_str[0:16], "%Y-%m-%dT%H:%M")
         #when = dt.strftime('%d %b %Y %H:%M')
-        when = friendly_time(dt)
+        when = Hypothesis.friendly_time(dt)
         s += '<div class="stream-url"><a target="_new" class="ng-binding" href="https://via.hypothes.is/%s">%s</a> <span class="annotation-timestamp small pull-right ng-binding ng-scope">%s</span> </div>' % (url, titles[url], when)
         if texts.has_key(url):
             list_of_texts = texts[url]

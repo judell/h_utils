@@ -1,4 +1,5 @@
-import requests,json, types
+import requests,json,types
+from datetime import datetime
 
 try:
     from urllib.parse import urlencode
@@ -51,24 +52,6 @@ class Hypothesis:
             for row in rows:
                 yield row
 
-    @staticmethod
-    def get_user_uri_doctitle_from_row(r):
-        user = r['user'].replace('acct:','').replace('@hypothes.is','')
-        uri = r['uri']
-        if r['uri'].startswith('urn:x-pdf') and r.has_key('document'):
-            if r['document'].has_key('link'):
-                uri = r['document']['link'][-1]['href']
-        if r.has_key('document') and r['document'].has_key('title'):
-            t = r['document']['title']
-            if isinstance(t, types.ListType) and len(t):
-                doc_title = t[0]
-            else:
-                doc_title = t
-        else:
-            doc_title = uri
-        doc_title = doc_title.replace('"',"'")
-        return { 'user':user, 'uri':uri, 'doc_title':doc_title }
-
     def create(self, url=None, start_pos=None, end_pos=None, prefix=None, quote=None, suffix=None, text=None, tags=None):
         headers = {'Authorization': 'Bearer ' + self.token}
         payload = {
@@ -107,18 +90,70 @@ class Hypothesis:
         r = requests.post(self.api_url + '/annotations', headers=headers, data=data)
         return r
 
-if __name__ == '__main__':
-    h = Hypothesis('judell','*****')
-    h.login()
-    r = h.create(url='http://jonudell.net', 
-                    prefix= 'This page', 
-                    quote= 'collects pointers to', 
-                    suffix= 'writing, software, audio, and video.', 
-                    text= 'test annotation', 
-                    tags= ['test','tag']
-                    )
+    @staticmethod
+    def friendly_time(dt):
+        now = datetime.now()
+        delta = now - dt
 
-    print r.status_code
+        minute = 60
+        hour = minute * 60
+        day = hour * 24
+        month = day * 30
+        year = day * 365
+
+        diff = delta.seconds + (delta.days * day)
+
+        if diff < 10:
+            return "just now"
+        if diff < minute:
+            return str(diff) + " seconds ago"
+        if diff < 2 * minute:
+            return "a minute ago"
+        if diff < hour:
+            return str(diff / minute) + " minutes ago"
+        if diff < 2 * hour:
+            return "an hour ago"
+        if diff < day:
+            return str(diff / hour) + " hours ago"
+        if diff < 2 * day:
+            return "a day ago"
+        if diff < month:
+            return str(diff / day) + " days ago"
+        if diff < 2 * month:
+            return "a month ago"
+        if diff < year:
+            return str(diff / month) + " months ago"
+        return str(diff / year) + " years ago"
+
+    @staticmethod
+    def get_info_from_row(r):
+        user = r['user'].replace('acct:','').replace('@hypothes.is','')
+        uri = r['uri']
+        if r['uri'].startswith('urn:x-pdf') and r.has_key('document'):
+            if r['document'].has_key('link'):
+                uri = r['document']['link'][-1]['href']
+        if r.has_key('document') and r['document'].has_key('title'):
+            t = r['document']['title']
+            if isinstance(t, types.ListType) and len(t):
+                doc_title = t[0]
+            else:
+                doc_title = t
+        else:
+            doc_title = uri
+        doc_title = doc_title.replace('"',"'")
+        if r.has_key('tags'):
+            tags = r['tags']
+            if isinstance(tags, types.ListType):
+                tags = [t.strip() for t in tags]
+            else:
+                tags = []
+        text = ''
+        if r.has_key('text'):
+            text = r['text']
+        return { 'user':user, 'uri':uri, 'doc_title':doc_title, 'tags':tags, 'text':text }
+
+ 
+
 
 
     
