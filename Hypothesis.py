@@ -157,12 +157,13 @@ class Hypothesis:
         else:
             doc_title = uri
         doc_title = doc_title.replace('"',"'")
-        if r.has_key('tags'):
+
+        tags = []
+        if r.has_key('tags') and r['tags'] is not None:
             tags = r['tags']
             if isinstance(tags, types.ListType):
                 tags = [t.strip() for t in tags]
-        else:
-            tags = []
+
         text = ''
         if r.has_key('text'):
             text = r['text']
