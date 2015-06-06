@@ -19,8 +19,8 @@ from feedgen.feed import FeedGenerator
 from BaseHTTPServer import BaseHTTPRequestHandler
 import urlparse, operator
 
-host = 'localhost'
-#host = 'h.jonudell.info'
+#host = 'localhost'
+host = 'h.jonudell.info'
 port = 8080
 host_port = 'http://' + host + ':' + str(port)
 
@@ -133,7 +133,6 @@ def user_activity(q):
 def make_activity(j):
     users = defaultdict(int)
     days = defaultdict(int)
-    details = ''
     rows = j['rows']
     for row in rows:
         info = Hypothesis.get_info_from_row(row)
@@ -143,15 +142,23 @@ def make_activity(j):
         user = info['user']
         users[user] += 1
         uri = info['uri']
-        details += '<div>created %s user %s uri %s</div>' % ( created, user, uri)
 
     days = sorted(days.items(), key=operator.itemgetter(0,1), reverse=True)
 
     users = sorted(users.items(), key=operator.itemgetter(1,0), reverse=True)
 
-    s = '<p>most recent 200 annotations</p>'
-
-    s += '<p>days: %s </p>' % len(days)
+    html = """
+<html>
+<head><style>
+body { font-family: verdana; margin: .2in; }
+</style></head>
+<body>
+<h1>Hypothesis recent 200 annotations</h1>
+%s
+</body>
+</html>
+ """
+    s = '<p>days: %s </p>' % len(days)
     for day in days:
         s += '<div>%s: %s</div>' % (day[0], day[1])
 
@@ -162,9 +169,7 @@ def make_activity(j):
         url = host_port + '/?method=user_widget&user=' + uname
         s += '<div><a target="_new" title="see annotation activity" href="%s">%s</a>: %s</div>' % (url, uname, user[1])
 
-    s += '<p>details</p>'
-    s += details
-    return s
+    return html % s
 
 def make_feed(j, facet,  value):
     url = host_port + '/'
