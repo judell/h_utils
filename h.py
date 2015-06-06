@@ -11,7 +11,7 @@
 """
 
 import json, urllib, urllib2, re, chardet, traceback, types
-from Hypothesis import Hypothesis
+from Hypothesis import Hypothesis, HypothesisUserActivity
 from collections import defaultdict
 from datetime import datetime
 from feedgen.feed import FeedGenerator
@@ -54,7 +54,7 @@ class GetHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return;
         if method == 'user_widget':
-            body = user_widget(q)
+            body = user_activity(q)
             self.do_headers('text/html; charset=UTF-8', body)
             self.wfile.write(body)
             return;
@@ -78,7 +78,7 @@ def multi_tag(q):
 
 def make_multi_tag(j,tags):
     rows = j['rows']
-    tmpl = """<html>
+    html = """<html>
 <head>
  <style>
  body { font-family:verdana;margin:.5in }
@@ -91,18 +91,18 @@ def make_multi_tag(j,tags):
     s = '<h1>Search for tags: ' + ','.join(tags) + '</h1>'
     s += '<h2>found ' + str(len(rows)) + '</h2><hr>'
     for row in rows:
-        updated = row['updated'][0:19]
-        user = row['user'].replace('acct:','').replace('@hypothes.is','')
-        uri = row['uri']
-        text = row['text']
-        tags = row['tags']
+        info = Hypothesis.get_info_from_row(row)
+        updated = info['updated']
+        user = info['user']
+        uri = info['uri']
+        text = info['text']
+        tags = info['tags']
         s += '<p><a href="%s">%s</a></p>' % ( uri, uri)
         s += '<p>%s</p>' % text
         tags = ['<a href="' + host_port + '/?method=multi_tag&tags=' + urllib.quote(t) + '">' + t + '</a>' for t in tags]
         s += '<p class="attribution">%s - %s - %s</p>' % ( user, updated, ', '.join(tags))
         s += '<hr>'
-    return (tmpl % s).encode('UTF-8')
-
+    return (html % s).encode('UTF-8')
 
 def _feed(q,facet):
     value = urlparse.parse_qs(q)[facet][0]
@@ -121,13 +121,14 @@ def activity(q):
     j = json.loads(s)
     return make_activity(j)
 
-def user_widget(q):
+def user_activity(q):
     user = urlparse.parse_qs(q)['user'][0]
     h_url = 'https://hypothes.is/api/search?limit=200&user=' + user
     s = urllib2.urlopen(h_url).read()
     s = s.decode('utf-8')
     j = json.loads(s)
-    return make_user_widget(j, user, 15)
+    #return make_user_widget(j, user, 15)
+    return get_user_activity(j, user)
 
 def make_activity(j):
     users = defaultdict(int)
@@ -198,92 +199,47 @@ def make_feed(j, facet,  value):
     return str.encode('utf-8')
 
 def get_user_activity(j, user):
-    texts = {}
-    titles = {}
-    datetimes = {}
+
+    activity = HypothesisUserActivity()
     
     for row in j['rows']:
-        info = Hypothesis.get_info_from_row(row)
-        url = info['uri'].replace('https://via.hypothes.is/h/','').replace('https://via.hypothes.is/','')
-        datetimes[url] = row['updated']
-        titles[url] = info['doc_title']
-        tags = info['tags']
-        text = info['text']
-        tag_html = ''
-        try:
-            if len(tags):
-                tag_items = []
-                for tag in row['tags']:
-                    tag_items.append('<li><span class="tag-item">%s</span></li>' % tag)
-                tag_html = '<ul>%s</ul>' % '\n'.join(tag_items)
-            if row.has_key('target') is False:
-                continue
-            if len(row['target']) == 0:
-                continue
-            selector = row['target'][0]['selector']
-            for sel in selector:
-                if sel.has_key('exact'):
-                    target = sel['exact']
-                    text = info['text']
-                    text = re.sub('\n+','<p>', text)
-                    img_pat = '!\[Image Description\]\(([^\)]+)\)'
-                    text = re.sub(img_pat, r'<img src="\1">', text)
-                    url_pat = '\[([^\]]+)\]\(([^\)]+)\)'
-                    text = re.sub(url_pat, r'<a href="\2">\1</a>', text)
-                    add_or_append(texts, url, (target,text,tag_html))
-        except:
-            print traceback.format_exc()
-    return datetimes, texts, titles
+        activity.add_row(row)
+    activity.sort()
 
-def make_user_widget(j, user, limit):
-    
-    datetimes, texts, titles = get_user_activity(j, user)
-
-    date_ordered_urls = sorted(datetimes.items(), key=operator.itemgetter(1,0), reverse=True)
-    
     s = '<h1>Hypothesis activity for %s</h1>' % user
 
-    for tuple in date_ordered_urls[0:limit]:
-        url = tuple[0]
-        dt_str = tuple[1]
-        dt = datetime.strptime(dt_str[0:16], "%Y-%m-%dT%H:%M")
-        #when = dt.strftime('%d %b %Y %H:%M')
-        when = Hypothesis.friendly_time(dt)
-        s += '<div class="stream-url"><a target="_new" class="ng-binding" href="https://via.hypothes.is/%s">%s</a> <span class="annotation-timestamp small pull-right ng-binding ng-scope">%s</span> </div>' % (url, titles[url], when)
-        if texts.has_key(url):
-            list_of_texts = texts[url]
-            list_of_texts.reverse()
-            for target_and_text_and_tags in list_of_texts: 
-                target = target_and_text_and_tags[0]
-                text = target_and_text_and_tags[1]
-                tags = target_and_text_and_tags[2]
-                s += '<div class="stream-quote"><span class="annotation-quote">%s</span></div><div class="stream-comment">%s</div>' % (target,text)
-                if tags != '':
-                    s += '<div class="stream-tags">%s</div>' % tags
-    s = """<html>
-<head>
- <link rel="stylesheet" href="https://hypothes.is/assets/styles/app.min.css" />
- <link rel="stylesheet" href="https://hypothes.is/assets/styles/hypothesis.min.css" />
- <style>
- body { padding: 10px; font-size: 10pt }
- h1 { font-weight: bold; margin-bottom:10pt }
- .stream-quote { margin-bottom: 4pt; }
- .stream-url { margin-bottom: 4pt; overflow:hidden}
- .stream-comment { margin-bottom: 4pt; margin-left:10%%; word-wrap: break-word }
- .stream-tags { margin-left: 10%%; margin-bottom: 4pt }
- .annotation-quote { padding: 0 }
- ul, li { display: inline }
- li { color: #969696; font-size: smaller; border: 1px solid #d3d3d3; border-radius: 2px; padding: 0 .4545em .1818em }
- img { max-width: 100%% }
- annotation-timestamp { margin-right: 20px }
- img { padding:10px }
- a { word-wrap: break-word }
- </style>
-<body class="ng-scope">
-%s
-</body>
-</html>
-""" % (s)
+    for uri in activity.uri_updates:
+        bundles = activity.uri_bundles[uri]
+        for bundle in bundles:
+            dt_str = bundle['updated']
+            dt = datetime.strptime(dt_str[0:16], "%Y-%m-%dT%H:%M")
+            when = Hypothesis.friendly_time(dt)
+            uri = bundle['uri']
+            doc_title = bundle['doc_title']
+            s += """<div class="stream-url">
+    <a target="_new" class="ng-binding" href="%s/%s">%s</a>
+    <span class="annotation-timestamp small pull-right ng-binding ng-scope">%s</span> 
+    </div>""" % (Hypothesis().via_url, uri, doc_title, when)
+
+            references_html = bundle['references_html']
+            quote_html = bundle['quote_html']
+            text_html = bundle['text_html']
+            tag_html = bundle['tag_html']
+
+            if references_html != '':
+                s += '<div class="stream-reference">%s</div>\n' % references_html
+
+            if quote_html != '':
+                s += """<div class="stream-quote">
+    <span class="annotation-quote">%s</span>
+    </div>
+    <div class="stream-comment">%s</div>""" % (quote_html, text_html)
+
+            if tag_html != '':
+                s += '<div class="stream-tags">%s</div>' % tag_html
+
+    s = Hypothesis.get_stream_template() % (s)
+
     return s.encode('utf-8')
 
 def add_or_append(dict, key, val):
