@@ -135,9 +135,17 @@ class Hypothesis:
         updated = r['updated'][0:19]
         user = r['user'].replace('acct:','').replace('@hypothes.is','')
         uri = r['uri'].replace('https://via.hypothes.is/h/','').replace('https://via.hypothes.is/','')
+
         if r['uri'].startswith('urn:x-pdf') and r.has_key('document'):
             if r['document'].has_key('link'):
-                uri = r['document']['link'][-1]['href']
+                links = r['document']['link']
+                for link in links:
+                    uri = link['href']
+                    if uri.encode('utf-8').startswith('urn:') == False:
+                        break
+            if uri.encode('utf-8').startswith('urn:') and r['document'].has_key('filename'):
+                uri = r['document']['filename']
+
         if r.has_key('document') and r['document'].has_key('title'):
             t = r['document']['title']
             if isinstance(t, types.ListType) and len(t):
@@ -151,8 +159,8 @@ class Hypothesis:
             tags = r['tags']
             if isinstance(tags, types.ListType):
                 tags = [t.strip() for t in tags]
-            else:
-                tags = []
+        else:
+            tags = []
         text = ''
         if r.has_key('text'):
             text = r['text']
@@ -162,8 +170,13 @@ class Hypothesis:
         target = []
         if r.has_key('target'):
             target = r['target']
+
+        is_page_note = False
+        if target == [] and tags == []:
+            is_page_note = True
+
         return {'updated':updated, 'user':user, 'uri':uri, 'doc_title':doc_title, 
-                'tags':tags, 'text':text, 'references':refs, 'target':target }
+                'tags':tags, 'text':text, 'references':refs, 'target':target, 'is_page_note':is_page_note }
 
     @staticmethod
     def get_stream_template():
@@ -172,13 +185,13 @@ class Hypothesis:
     <link rel="stylesheet" href="https://hypothes.is/assets/styles/app.min.css" />
     <link rel="stylesheet" href="https://hypothes.is/assets/styles/hypothesis.min.css" />
     <style>
-    body { padding: 10px; font-size: 10pt }
+    body { padding: 10px; font-size: 10pt; }
     h1 { font-weight: bold; margin-bottom:10pt }
-    .stream-quote { margin-bottom: 4pt; }
     .stream-url { margin-bottom: 4pt; overflow:hidden}
-    .stream-comment { margin-bottom: 4pt; margin-left:10%%; word-wrap: break-word }
-    .stream-tags { margin-left: 10%%; margin-bottom: 4pt }
-    .annotation-quote { padding: 0 }
+    .stream-reference { margin-bottom:10pt; margin-left:6%% }
+    .stream-quote { margin-left: 3%%; margin-bottom: 4pt; font-style: italic }
+    .stream-text { margin-bottom: 4pt; margin-left:7%%; word-wrap: break-word }
+    .stream-tags { margin-bottom: 10pt; }
     ul, li { display: inline }
     li { color: #969696; font-size: smaller; border: 1px solid #d3d3d3; border-radius: 2px; padding: 0 .4545em .1818em }
     img { max-width: 100%% }
@@ -222,25 +235,30 @@ class Hypothesis:
         text = re.sub(img_pat, r'<img src="\1">', text)
         url_pat = '\[([^\]]+)\]\(([^\)]+)\)'
         text = re.sub(url_pat, r'<a href="\2">\1</a>', text)
+        if info['is_page_note']:
+            text = '<span title="Page Note" class="h-icon-insert-comment"></span> ' + text
         return text
 
     @staticmethod
     def make_references_html(info):
         anno_url = Hypothesis().anno_url
         references = info['references']
-        if references is None:
+        if references is None or len(references) == 0:
             return ''
-        else:
-            assert( isinstance(references,types.ListType) )
-            refs = ['<a href="' + anno_url + '/' + ref + '">' + anno_url + '/' + ref + '</a>' for ref in references]
-            return ' '.join(refs)
+        assert( isinstance(references,types.ListType) )
+        #refs = ['<a href="' + anno_url + '/' + ref + '">reference</a>' for ref in references]
+        #return ' '.join(refs)
+        ref = references[0]
+        ref = '<a target="_new" href="%s/%s">conversation</a>' % ( anno_url, ref )
+        return ref
         
 class HypothesisUserActivity:
 
-    def __init__(self):
+    def __init__(self,limit):
         self.uri_bundles = defaultdict(list)
         self.uri_updates = {}
         self.uris_by_recent_update = []
+        self.limit = limit
 
     def add_row(self,row):
         info = Hypothesis.get_info_from_row(row)
@@ -251,19 +269,23 @@ class HypothesisUserActivity:
         uri = info['uri']
         doc_title = info['doc_title']
         updated = info['updated']
+        is_page_note = info['is_page_note']
         if self.uri_updates.has_key(uri) == True:  # track most-recent update per uri
             if updated < self.uri_updates[uri]:
                 self.uri_updates[uri] = updated
         else:
             self.uri_updates[uri] = updated
 
-        self.uri_bundles[uri].append( {'uri':uri, 'doc_title':doc_title,'updated':updated, 'references_html':references_html, 
-                                       'quote_html':quote_html, 'text_html':text_html, 'tag_html':tag_html} )
+        self.uri_bundles[uri].append( {'uri':uri, 'doc_title':doc_title,'updated':updated, 
+                                       'references_html':references_html, 'quote_html':quote_html, 
+                                        'text_html':text_html, 'tag_html':tag_html, 
+                                        'is_page_note':is_page_note} )
 
     def sort(self):
         sorted_uri_updates = sorted(self.uri_updates.items(), key=operator.itemgetter(1), reverse=True)
         for update in sorted_uri_updates:
             self.uris_by_recent_update.append( update[0] )
+
 
 
 

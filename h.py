@@ -200,7 +200,7 @@ def make_feed(j, facet,  value):
 
 def get_user_activity(j, user):
 
-    activity = HypothesisUserActivity()
+    activity = HypothesisUserActivity(limit=15)
     
     for row in j['rows']:
         activity.add_row(row)
@@ -208,7 +208,7 @@ def get_user_activity(j, user):
 
     s = '<h1>Hypothesis activity for %s</h1>' % user
 
-    for uri in activity.uri_updates:
+    for uri in activity.uris_by_recent_update:
         bundles = activity.uri_bundles[uri]
         for bundle in bundles:
             dt_str = bundle['updated']
@@ -226,14 +226,16 @@ def get_user_activity(j, user):
             text_html = bundle['text_html']
             tag_html = bundle['tag_html']
 
-            if references_html != '':
-                s += '<div class="stream-reference">%s</div>\n' % references_html
+            is_page_note = bundle['is_page_note']
 
             if quote_html != '':
-                s += """<div class="stream-quote">
-    <span class="annotation-quote">%s</span>
-    </div>
-    <div class="stream-comment">%s</div>""" % (quote_html, text_html)
+                s += """<div class="stream-quote">%s</div>"""  % quote_html
+
+            if text_html != '':
+                s += """<div class="stream-text">%s</div>""" %  text_html
+
+            if references_html != '':
+                s += '<p class="stream-reference">%s</p>\n' % references_html
 
             if tag_html != '':
                 s += '<div class="stream-tags">%s</div>' % tag_html
