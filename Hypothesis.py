@@ -1,6 +1,8 @@
 import requests, json, types, re, operator
 from datetime import datetime
 from collections import defaultdict
+from markdown import markdown
+
 
 try:
     from urllib.parse import urlencode
@@ -172,7 +174,7 @@ class Hypothesis:
             target = r['target']
 
         is_page_note = False
-        if target == [] and tags == []:
+        if refs == [] and target == [] and tags == []: 
             is_page_note = True
 
         return {'updated':updated, 'user':user, 'uri':uri, 'doc_title':doc_title, 
@@ -230,13 +232,9 @@ class Hypothesis:
     @staticmethod
     def make_text_html(info):
         text = info['text']
-        text = re.sub('\n+','<p>', text)
-        img_pat = '!\[Image Description\]\(([^\)]+)\)'
-        text = re.sub(img_pat, r'<img src="\1">', text)
-        url_pat = '\[([^\]]+)\]\(([^\)]+)\)'
-        text = re.sub(url_pat, r'<a href="\2">\1</a>', text)
         if info['is_page_note']:
             text = '<span title="Page Note" class="h-icon-insert-comment"></span> ' + text
+        text = markdown(text)
         return text
 
     @staticmethod

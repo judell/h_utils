@@ -10,7 +10,7 @@
 /?method=multi_tag&tags=[TAG1,TAG2]
 """
 
-import json, urllib, urllib2, re, chardet, traceback, types
+import json, urllib, urllib2, re, traceback, types
 from Hypothesis import Hypothesis, HypothesisUserActivity
 from collections import defaultdict
 from datetime import datetime
@@ -231,7 +231,7 @@ def get_user_activity(j, user):
             if quote_html != '':
                 s += """<div class="stream-quote">%s</div>"""  % quote_html
 
-            if text_html != '':
+            if text_html != '' and references_html == '':
                 s += """<div class="stream-text">%s</div>""" %  text_html
 
             if references_html != '':
