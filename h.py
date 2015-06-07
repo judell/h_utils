@@ -10,7 +10,7 @@
 /?method=multi_tag&tags=[TAG1,TAG2]
 """
 
-import json, urllib, urllib2, re, traceback, types
+import json, urllib, requests, re, traceback, types
 from Hypothesis import Hypothesis, HypothesisUserActivity
 from collections import defaultdict
 from datetime import datetime
@@ -19,49 +19,54 @@ from feedgen.feed import FeedGenerator
 from BaseHTTPServer import BaseHTTPRequestHandler
 import urlparse, operator
 
-#host = 'localhost'
-host = 'h.jonudell.info'
+host = 'localhost'
+#host = 'h.jonudell.info'
 port = 8080
 host_port = 'http://' + host + ':' + str(port)
 
 class GetHandler(BaseHTTPRequestHandler):
-    
-    def do_headers(self, mime_type, body):
+
+    def respond_200(self, mime_type, body):
         self.send_response(200)
         self.send_header(  'Content-Type' , mime_type )
         self.send_header(  'Content-Length' , str(len(body)) )
         self.end_headers()
+        self.wfile.write(body)
 
     def do_GET(self):
-        if not "method=" in self.path:
-            return    
+
+        if self.path == '/js':             # handle exactly 1 file
+            f = open('h.js')
+            body = f.read()
+            f.close()
+            self.respond_200('text/javascript; charset=UTF-8', body)
+            return;
+
+        if not "method=" in self.path:     # and just these methods
+            return   
+         
         parsed_path = urlparse.urlparse(self.path)
         q = parsed_path.query
         method = urlparse.parse_qs(q)['method'][0]
         if method == 'feed':
             body = _feed(q, 'tag')
-            self.do_headers('application/xml; charset=UTF-8', body)
-            self.wfile.write(body)
+            self.respond_200('application/xml; charset=UTF-8', body)
             return;
         if method == 'urlfeed':
             body = _feed(q, 'url')
-            self.do_headers('application/xml; charset=UTF-8', body)
-            self.wfile.write(body)
+            self.respond_200('application/xml; charset=UTF-8', body)
             return;
         if method == 'activity':
             body = activity(q)
-            self.do_headers('text/html; charset=UTF-8', body)
-            self.wfile.write(body)
+            self.respond_200('text/html; charset=UTF-8', body)
             return;
         if method == 'user_widget':
             body = user_activity(q)
-            self.do_headers('text/html; charset=UTF-8', body)
-            self.wfile.write(body)
+            self.respond_200('text/html; charset=UTF-8', body)
             return;
         if method == 'multi_tag':
             body = multi_tag(q)
-            self.do_headers('text/html; charset=UTF-8', body)
-            self.wfile.write(body)
+            self.respond_200('text/html; charset=UTF-8', body)
             return;
 
 def multi_tag(q):
@@ -72,7 +77,7 @@ def multi_tag(q):
     args = ['tags=' + a for a in tags]
     args = '&'.join(args)
     h_url = 'https://hypothes.is/api/search?limit=200&' + args
-    s = urllib2.urlopen(h_url).read()
+    s = requests.get(h_url).text.decode('utf-8')
     j = json.loads(s)
     return make_multi_tag(j,tags)
 
@@ -102,7 +107,7 @@ def make_multi_tag(j,tags):
         tags = ['<a href="' + host_port + '/?method=multi_tag&tags=' + urllib.quote(t) + '">' + t + '</a>' for t in tags]
         s += '<p class="attribution">%s - %s - %s</p>' % ( user, updated, ', '.join(tags))
         s += '<hr>'
-    return (html % s).encode('UTF-8')
+    return (html % s).encode('utf-8')
 
 def _feed(q,facet):
     value = urlparse.parse_qs(q)[facet][0]
@@ -110,24 +115,21 @@ def _feed(q,facet):
         h_url = 'https://hypothes.is/api/search?tags=' + value
     if facet == 'url':
         h_url = 'https://hypothes.is/api/search?uri=' + value
-    s = urllib2.urlopen(h_url).read()
-    s = s.decode('utf-8')
+    s = requests.get(h_url).text.decode('utf-8')
     j = json.loads(s)
     return make_feed(j, facet, value)
 
 def activity(q):
     h_url = 'https://hypothes.is/api/search?limit=1000'
-    s = urllib2.urlopen(h_url).read()
+    s = requests.get(h_url).text.decode('utf-8')
     j = json.loads(s)
     return make_activity(j)
 
 def user_activity(q):
     user = urlparse.parse_qs(q)['user'][0]
     h_url = 'https://hypothes.is/api/search?limit=200&user=' + user
-    s = urllib2.urlopen(h_url).read()
-    s = s.decode('utf-8')
+    s = requests.get(h_url).text.decode('utf-8')
     j = json.loads(s)
-    #return make_user_widget(j, user, 15)
     return get_user_activity(j, user)
 
 def make_activity(j):
@@ -221,10 +223,15 @@ def get_user_activity(j, user):
             when = Hypothesis.friendly_time(dt)
             uri = bundle['uri']
             doc_title = bundle['doc_title']
-            s += """<div class="stream-url">
-    <a target="_new" class="ng-binding" href="%s/%s">%s</a>
-    <span class="annotation-timestamp small pull-right ng-binding ng-scope">%s</span> 
-    </div>""" % (Hypothesis().via_url, uri, doc_title, when)
+            via_url = Hypothesis().via_url
+            try:
+                s += """<div class="stream-url">
+    <a target="_new" class="ng-binding" href="%s">%s</a> 
+    (<a title="use Hypothesis proxy" target="_new" href="{%s}/{%s}">via</a>)
+    <span class="annotation-timestamp small pull-right ng-binding ng-scope">{%s}</span> 
+    </div>""" % (uri, doc_title, via_url, uri, when)
+            except:
+                tb = traceback.format_exc()
 
             references_html = bundle['references_html']
             quote_html = bundle['quote_html']
