@@ -157,6 +157,7 @@ class Hypothesis:
         else:
             doc_title = uri
         doc_title = doc_title.replace('"',"'")
+        if doc_title == '': doc_title = 'untitled'
 
         tags = []
         if r.has_key('tags') and r['tags'] is not None:
@@ -187,6 +188,7 @@ class Hypothesis:
 <head>
     <link rel="stylesheet" href="https://hypothes.is/assets/styles/app.min.css" />
     <link rel="stylesheet" href="https://hypothes.is/assets/styles/hypothesis.min.css" />
+    <script src="/js"></script>
     <style>
     body { padding: 10px; font-size: 10pt; }
     h1 { font-weight: bold; margin-bottom:10pt }
@@ -245,12 +247,15 @@ class Hypothesis:
         if references is None or len(references) == 0:
             return ''
         assert( isinstance(references,types.ListType) )
-        #refs = ['<a href="' + anno_url + '/' + ref + '">reference</a>' for ref in references]
-        #return ' '.join(refs)
         ref = references[0]
-        ref = '<a target="_new" href="%s/%s">conversation</a>' % ( anno_url, ref )
-        return ref
-        
+        html = """
+<a onclick="javascript:embed_conversation('{ref}'); return false"  
+   id="{ref}" 
+   target="_new" 
+   href="{anno_url}/{ref}">conversation</a>"""
+        ref_html = html.format(anno_url=anno_url, ref=ref)
+        return ref_html
+
 class HypothesisUserActivity:
 
     def __init__(self,limit):
