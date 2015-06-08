@@ -19,8 +19,8 @@ from feedgen.feed import FeedGenerator
 from BaseHTTPServer import BaseHTTPRequestHandler
 import urlparse, operator
 
-host = 'localhost'
-#host = 'h.jonudell.info'
+#host = 'localhost'
+host = 'h.jonudell.info'
 port = 8080
 host_port = 'http://' + host + ':' + str(port)
 
@@ -35,12 +35,17 @@ class GetHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
 
+        print self.path
+
         if self.path == '/js':             # handle exactly 1 file
-            f = open('h.js')
-            body = f.read()
-            f.close()
-            self.respond_200('text/javascript; charset=UTF-8', body)
-            return;
+            try:
+                f = open('h.js')
+                body = f.read()
+                f.close()
+                self.respond_200('text/javascript; charset=UTF-8', body)
+                return;
+            except:
+                print traceback.format_exc()
 
         if not "method=" in self.path:     # and just these methods
             return   
