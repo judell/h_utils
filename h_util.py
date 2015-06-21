@@ -370,7 +370,11 @@ class HypothesisStream:
             if by_url == 'yes':
                 user = html_annotation.raw.user
                 s += '<p class="stream-user"><a href="/stream.alt?user=%s">%s</a></p>' % (user, user)
-           
+        
+            #references_html = bundle['references_html']
+            #references_html = '<p>' + annotation['id'] + '</p>'
+            references_html = ''
+            
             quote_html = html_annotation.quote_html
             text_html = html_annotation.text_html
             tag_html = html_annotation.tag_html
