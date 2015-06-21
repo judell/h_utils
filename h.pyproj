@@ -6,8 +6,7 @@
     <ProjectGuid>cfa65d87-9248-4827-946e-292464cdf292</ProjectGuid>
     <ProjectHome>.</ProjectHome>
     <StartupFile>h.py</StartupFile>
-    <SearchPath>
-    </SearchPath>
+    <SearchPath>..\..\..\python-google-spreadsheet\</SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
     <OutputPath>.</OutputPath>
     <Name>h</Name>
@@ -24,8 +23,16 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="get_all_annos.py" />
     <Compile Include="h.py" />
-    <Compile Include="Hypothesis.py" />
+    <Compile Include="h_util.py" />
+    <Compile Include="doi_aliases.py">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="test.py">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="users.py" />
   </ItemGroup>
   <ItemGroup>
     <InterpreterReference Include="{2af0f10d-7135-4994-9156-5d01c9c11b7e}\2.7" />
