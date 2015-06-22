@@ -157,47 +157,64 @@ class HypothesisUtils:
         return str(diff / year) + " years ago"
 
     @staticmethod
-    def init_tag_url(limit=None, selected_user=None, by_url=None):
+    def alt_stream_js(request):
+        from pyramid.response import Response
+        js = """
+     function show_user(by_url) {
+       var select = document.getElementsByName('active_users')[0];
+       var i = select.selectedIndex;
+       var user = select[i].value;
+       location.href= '/stream.alt?by_url=' + by_url + '&user=' + user;
+    } """
+        r = Response(js)
+        r.content_type = b'text/javascript'
+        return r
+
+class HypothesisStream:
+
+    def __init__(self, limit=None):
+        self.uri_html_annotations = defaultdict(list)
+        self.uri_updates = {}
+        self.uris_by_recent_update = []
+        self.uri_references = {}
+        self.limit = limit
+        self.conversations = {}
+        self.by_url = 'no'
+
+    def add_row(self, row, selected_user=None, selected_tags=None):
+        raw = HypothesisRawAnnotation(row)
+        if len(raw.references):
+            ref = raw.references[0]
+            self.conversations[ref] = HypothesisHtmlAnnotation(self, raw, selected_tags, selected_user)
+            return
+
+        uri = raw.uri
+        updated = raw.updated
+        if self.uri_updates.has_key(uri) == True:  # track most-recent update per uri
+            if updated < self.uri_updates[uri]:
+                self.uri_updates[uri] = updated
+        else:
+            self.uri_updates[uri] = updated
+
+        html_annotation = HypothesisHtmlAnnotation(self, raw, selected_tags, selected_user)
+        self.uri_html_annotations[uri].append( html_annotation )
+
+    def sort(self):
+        sorted_uri_updates = sorted(self.uri_updates.items(), key=operator.itemgetter(1), reverse=True)
+        for update in sorted_uri_updates:
+            self.uris_by_recent_update.append( update[0] )
+
+    def init_tag_url(self, limit=None, selected_user=None):
         url = '/stream.alt?user='
         if selected_user is not None:
             url += selected_user
-        url += '&by_url='
-        if by_url == 'yes':
-            url += 'yes'
+        url += '&by_url=' + self.by_url
         url += '&limit='
         if limit is not None:
             url += str(limit)
         return url
 
-    @staticmethod
-    def make_tag_html(raw, limit=None, selected_user=None, selected_tags=None, by_url=None):
-
-        row_tags = raw.tags
-        if len(row_tags) == 0:
-            return ''
-        if selected_tags is None:
-            selected_tags = ()
-
-        tag_items = []
-        for row_tag in row_tags:
-            url = HypothesisUtils.init_tag_url(limit=limit, selected_user=selected_user, by_url=by_url)
-            if row_tag in selected_tags:
-                klass = "selected-tag-item"
-                tags = list(selected_tags)
-                tags.remove(row_tag)
-                url += '&tags=' + ','.join(tags)
-                tag_html = '<a title="remove filter on this tag" href="%s">%s</a>' % ( url, row_tag )
-            else:
-                klass = "tag-item"
-                tags = list(selected_tags)
-                tags.append(row_tag)
-                url += '&tags=' + ','.join(tags)
-                tag_html = '<a title="add filter on this tag" href="%s">%s</a>' % ( url, row_tag)
-            tag_items.append('<li class="%s">%s</li>' % (klass, tag_html))
-        return '<ul>%s</ul>' % '\n'.join(tag_items)
-
-    @staticmethod
-    def make_quote_html(raw):
+    def make_quote_html(self,raw):
         quote = ''
         target = raw.target
         try:
@@ -221,90 +238,44 @@ class HypothesisUtils:
           print s
         return quote
 
-    @staticmethod
-    def make_text_html(raw):
+    def make_text_html(self, raw):
         text = raw.text
         if raw.is_page_note:
             text = '<span title="Page Note" class="h-icon-insert-comment"></span> ' + text
         text = markdown(text)
         return text
 
-    @staticmethod
-    def make_references_html(raw):
-        anno_url = HypothesisUtils().anno_url
-        references = raw.references
-        if references is None or len(references) == 0:
+
+    def make_tag_html(self, raw, selected_user=None, selected_tags=None):
+        row_tags = raw.tags
+        if len(row_tags) == 0:
             return ''
-        assert( isinstance(references,types.ListType) )
-        ref = references[0]
-        html = """
-<a onclick="javascript:embed_conversation('{ref}'); return false"  
-   id="{ref}" 
-   target="_new" 
-   href="{anno_url}/{ref}">conversation</a>"""
-        ref_html = html.format(anno_url=anno_url, ref=ref)
-        return ref_html
+        if selected_tags is None:
+            selected_tags = ()
 
-    @staticmethod
-    def alt_stream_js(request):
-        from pyramid.response import Response
-        js = """
-    function embed_conversation(id) {
-        element = document.getElementById(id);
-        element.outerHTML = '<iframe height="300" width="85%" src="https://hypothes.is/a/' + id + '"/>'
-        return false;
-    }
+        tag_items = []
+        for row_tag in row_tags:
+            tags = list(selected_tags)
+            url = self.init_tag_url(selected_user=selected_user)
+            if row_tag in selected_tags:
+                klass = "selected-tag-item"
+                tags.remove(row_tag)
+                url += '&tags=' + ','.join(tags)
+                tag_html = '<a title="remove filter on this tag" href="%s">%s</a>' % ( url, row_tag )
+            else:
+                klass = "tag-item"
+                tags.append(row_tag)
+                url += '&tags=' + ','.join(tags)
+                tag_html = '<a title="add filter on this tag" href="%s">%s</a>' % ( url, row_tag)
+            tag_items.append('<li class="%s">%s</li>' % (klass, tag_html))
+        return '<ul>%s</ul>' % '\n'.join(tag_items)
 
-    function show_user() {
-       var select = document.getElementsByName('active_users')[0];
-       var i = select.selectedIndex;
-       var user = select[i].value;
-       location.href= '/stream.alt?user=' + user;
-    } """
-        r = Response(js)
-        r.content_type = b'text/javascript'
-        return r
-
-class HypothesisStream:
-
-    def __init__(self, limit=None):
-        self.uri_html_annotations = defaultdict(list)
-        self.uri_updates = {}
-        self.uris_by_recent_update = []
-        self.uri_references = {}
-        self.limit = limit
-        self.conversations = {}
-
-    def add_row(self, row, selected_user=None, selected_tags=None, by_url=None):
-        raw = HypothesisRawAnnotation(row)
-        if len(raw.references):
-            ref = raw.references[0]
-            self.conversations[ref] = HypothesisHtmlAnnotation(self.limit, by_url, raw, selected_tags, selected_user)
-            return
-
-        uri = raw.uri
-        updated = raw.updated
-        if self.uri_updates.has_key(uri) == True:  # track most-recent update per uri
-            if updated < self.uri_updates[uri]:
-                self.uri_updates[uri] = updated
-        else:
-            self.uri_updates[uri] = updated
-
-        html_annotation = HypothesisHtmlAnnotation(self.limit, by_url, raw, selected_tags, selected_user)
-        self.uri_html_annotations[uri].append( html_annotation )
-
-    def sort(self):
-        sorted_uri_updates = sorted(self.uri_updates.items(), key=operator.itemgetter(1), reverse=True)
-        for update in sorted_uri_updates:
-            self.uris_by_recent_update.append( update[0] )
-
-    @staticmethod
-    def get_active_user_data(q):
+    def get_active_user_data(self, q):
         if q.has_key('user'):
             user = q['user'][0]
-            user, picklist, userlist = HypothesisStream.format_active_users(user=user)
+            user, picklist, userlist = self.format_active_users(user=user)
         else:
-            user, picklist, userlist = HypothesisStream.format_active_users(user=None)
+            user, picklist, userlist = self.format_active_users(user=None)
         userlist = [x[0] for x in userlist]
         return user, picklist, userlist
 
@@ -312,7 +283,6 @@ class HypothesisStream:
     def alt_stream(request):
         limit = 200
         q = urlparse.parse_qs(request.query_string)
-        user, picklist, userlist = HypothesisStream.get_active_user_data(q)  
         h_stream = HypothesisStream(limit)
         if q.has_key('tags'):
             tags = q['tags'][0].split(',')
@@ -321,21 +291,22 @@ class HypothesisStream:
         else:
             tags = None
         if q.has_key('by_url'):
-            by_url=q['by_url'][0]
+            h_stream.by_url=q['by_url'][0]
         else:
-            by_url=None
+            h_stream.by_url='yes'
+        user, picklist, userlist = h_stream.get_active_user_data(q)  
         if q.has_key('user'):
             user = q['user'][0]
             if user not in userlist:
                 picklist = ''
-        if by_url=='yes':
-            head = '<p class="stream-selector"><a href="/stream.alt?limit=%s">view recently active users</a></p>' % limit
+        if h_stream.by_url=='yes':
+            head = '<p class="stream-selector"><a href="/stream.alt?by_url=no">view recently active users</a></p>' 
             head += '<h1>urls recently annotated</h1>'
-            body = h_stream.make_alt_stream(user=None, tags=tags, by_url=by_url, limit=limit)
+            body = h_stream.make_alt_stream(user=None, tags=tags)
         else:
-            head = '<p class="stream-selector"><a href="/stream.alt?limit=%s&by_url=yes">view recently annotated urls</a></p>' % limit
+            head = '<p class="stream-selector"><a href="/stream.alt?by_url=yes">view recently annotated urls</a></p>' 
             head += '<h1 class="stream-active-users-widget">urls recently annotated by {user} <span class="stream-picklist">{users}</span></h1>'.format(user=user, users=picklist)
-            body = h_stream.make_alt_stream(user=user, tags=tags, by_url=by_url, limit=limit)
+            body = h_stream.make_alt_stream(user=user, tags=tags)
         html = HypothesisStream.alt_stream_template( {'head':head,  'main':body} )
         return Response(html.encode('utf-8'))
 
@@ -355,7 +326,7 @@ class HypothesisStream:
 </div>""" % when
         return s
 
-    def display_html_annotation(self, html_annotation, by_url, first, uri, is_reply=None):
+    def display_html_annotation(self, html_annotation=None, first=None, uri=None, is_reply=None):
             s = ''
             if first:
                 s = self.display_url(html_annotation, uri)
@@ -367,13 +338,9 @@ class HypothesisStream:
 
             #s += '<p>' + html_annotation.raw.id + '</p>'
         
-            if by_url == 'yes':
+            if self.by_url == 'yes':
                 user = html_annotation.raw.user
-                s += '<p class="stream-user"><a href="/stream.alt?user=%s">%s</a></p>' % (user, user)
-        
-            #references_html = bundle['references_html']
-            #references_html = '<p>' + annotation['id'] + '</p>'
-            references_html = ''
+                s += '<p class="stream-user"><a href="/stream.alt?user=%s&by_url=no">%s</a></p>' % (user, user)
             
             quote_html = html_annotation.quote_html
             text_html = html_annotation.text_html
@@ -384,7 +351,7 @@ class HypothesisStream:
             if quote_html != '':
                 s += """<p class="annotation-quote">%s</p>"""  % quote_html
         
-            if text_html != '' and references_html == '':
+            if text_html != '':
                 s += """<p class="stream-text">%s</p>""" %  (text_html)
         
             if tag_html != '':
@@ -393,16 +360,15 @@ class HypothesisStream:
             annotation_id = html_annotation.raw.id
             if self.conversations.has_key(annotation_id):
                 anno = self.conversations[annotation_id]
-                s += self.display_html_annotation(anno, by_url, False, uri, is_reply=True)
+                s += self.display_html_annotation(anno, first=False, uri=uri, is_reply=True)
 
             s += '</div>'
 
             return s
 
-    def make_alt_stream(self, user=None, tags=None, by_url=None, limit=None):
-        if limit is None:
-            limit = 200
-        bare_search_url = '%s/search?limit=%s' % ( HypothesisUtils().api_url, limit )
+    def make_alt_stream(self, user=None, tags=None):
+
+        bare_search_url = '%s/search?limit=%s' % ( HypothesisUtils().api_url, self.limit )
         parameterized_search_url = bare_search_url
 
         if user is not None:
@@ -416,12 +382,12 @@ class HypothesisStream:
 
         rows = response.json()['rows']
 
-        unique_urls = set()
-        for row in rows:
-            unique_urls.add(row['uri'])
+        #unique_urls = set()
+        #for row in rows:
+        #    unique_urls.add(row['uri'])
 
         for row in rows:
-           self.add_row(row, selected_user=user, selected_tags=tags, by_url=by_url)
+           self.add_row(row, selected_user=user, selected_tags=tags)
         self.sort()
 
         s = ''
@@ -431,11 +397,10 @@ class HypothesisStream:
             for i in range(len(html_annotations)):
                 first = ( i == 0 )
                 html_annotation = html_annotations[i]
-                s += self.display_html_annotation(html_annotation, by_url, first, uri)
+                s += self.display_html_annotation(html_annotation,  first=first, uri=uri, is_reply=False)
         return s
 
-    @staticmethod        
-    def format_active_users(user=None):
+    def format_active_users(self, user=None):
         active_users = HypothesisUtils().get_active_users()
         most_active_user = active_users[0][0]
         select = ''
@@ -447,9 +412,9 @@ class HypothesisStream:
             option = option % (active_user[0], active_user[0], active_user[1])
             select += option
         select = """<select class="stream-active-users" name="active_users" 
-    onchange="javascript:show_user()">
+    onchange="javascript:show_user('%s')">
     %s
-    </select>""" % select
+    </select>""" % (self.by_url, select)
         return most_active_user, select, active_users
 
     @staticmethod
@@ -486,6 +451,13 @@ class HypothesisStream:
 <script src="/stream.alt.js"></script>
 </body>
 </html> """.format(head=args['head'],main=args['main'])
+
+    class HypothesisHtmlAnnotation:
+        def __init__(self, raw, selected_tags, selected_user):
+            self.quote_html = self.make_quote_html(raw)
+            self.text_html = self.make_text_html(raw)
+            self.tag_html = self.make_tag_html(raw, selected_user=selected_user, selected_tags=selected_tags)
+            self.raw=raw
 
 class HypothesisRawAnnotation:
     
@@ -537,7 +509,6 @@ class HypothesisRawAnnotation:
         self.is_page_note = False
         if self.references == [] and self.target == [] and self.tags == []: 
             self.is_page_note = True
-
         if row.has_key('document') and row['document'].has_key('link'):
             self.links = row['document']['link']
             if not isinstance(self.links, types.ListType):
@@ -545,11 +516,10 @@ class HypothesisRawAnnotation:
         else:
             self.links = []
 
-      
-class HypothesisHtmlAnnotation:
-    def __init__(self, limit, by_url, raw, selected_tags, selected_user):
-        self.quote_html = HypothesisUtils.make_quote_html(raw)
-        self.text_html = HypothesisUtils.make_text_html(raw)
-        self.tag_html = HypothesisUtils.make_tag_html(raw, limit=limit, selected_user=selected_user, selected_tags=selected_tags, by_url=by_url)
-        self.raw=raw
 
+class HypothesisHtmlAnnotation:
+    def __init__(self, h_stream, raw, selected_tags, selected_user):
+        self.quote_html = h_stream.make_quote_html(raw)
+        self.text_html = h_stream.make_text_html(raw)
+        self.tag_html = h_stream.make_tag_html(raw,  selected_user=selected_user, selected_tags=selected_tags)
+        self.raw=raw
