@@ -452,13 +452,6 @@ class HypothesisStream:
 </body>
 </html> """.format(head=args['head'],main=args['main'])
 
-    class HypothesisHtmlAnnotation:
-        def __init__(self, raw, selected_tags, selected_user):
-            self.quote_html = self.make_quote_html(raw)
-            self.text_html = self.make_text_html(raw)
-            self.tag_html = self.make_tag_html(raw, selected_user=selected_user, selected_tags=selected_tags)
-            self.raw=raw
-
 class HypothesisRawAnnotation:
     
     def __init__(self, row):
