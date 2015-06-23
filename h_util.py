@@ -12,7 +12,6 @@ except ImportError:
 
 
 class HypothesisUtils:
-
     def __init__(self, username=None, password=None):
         self.app_url = 'https://hypothes.is/app'
         self.api_url = 'https://hypothes.is/api'
@@ -23,6 +22,7 @@ class HypothesisUtils:
         self.password = password
 
     def login(self):
+        """Request an assertion, exchange it for an auth token."""
         # https://github.com/rdhyee/hypothesisapi 
         r = requests.get(self.app_url)
         cookies = r.cookies
@@ -37,6 +37,7 @@ class HypothesisUtils:
         self.token =  r.content
 
     def search_all(self):
+        """Get all annotations."""
         params = {'limit':200, 'offset':0 }
         while True:
             h_url = self.query_url.format(query=urlencode(params))
@@ -48,19 +49,8 @@ class HypothesisUtils:
             for row in rows:
                 yield row
 
-    """ 
-    "link": [
-    {
-        "href": "http://thedeadcanary.wordpress.com/2014/05/11/song-of-myself/"
-    }, 
-    {
-        "href": "http://thedeadcanary.wordpress.com/2014/05/11/song-of-myself/", 
-        "type": "", 
-        "rel": "canonical"
-    }, 
-    """
-
     def make_annotation_payload(self, url, start_pos, end_pos, prefix, quote, suffix, text, tags, link):
+        """Create JSON payload for API call."""
         payload = {
             "uri": url,
             "user": 'acct:' + self.username + '@hypothes.is',
@@ -99,6 +89,7 @@ class HypothesisUtils:
 
     def create_annotation(self, url=None, start_pos=None, end_pos=None, prefix=None, 
                quote=None, suffix=None, text=None, tags=None, link=None):
+        """Call API with token and payload."""
         headers = {'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json;charset=utf-8' }
         payload = self.make_annotation_payload(url, start_pos, end_pos, prefix, quote, suffix, text, tags, link)
         data = json.dumps(payload, ensure_ascii=False)
@@ -106,11 +97,13 @@ class HypothesisUtils:
         return r
 
     def call_search_api(self, args={'limit':200}):
+        """Call search API with dictionary of params."""
         h_url = self.query_url.format(query=urlencode(args))
         json = requests.get(h_url).json()
         return json
 
     def get_active_users(self):
+        """Find users in results of a default API search."""
         j = self.call_search_api()
         users = defaultdict(int)
         rows = j['rows']
@@ -123,6 +116,7 @@ class HypothesisUtils:
 
     @staticmethod
     def friendly_time(dt):
+        """Represent a timestamp in a simple, friendly way."""
         now = datetime.now()
         delta = now - dt
 
@@ -158,6 +152,7 @@ class HypothesisUtils:
 
     @staticmethod
     def alt_stream_js(request):
+        """Temporarily here to keep assets contained in the module."""
         from pyramid.response import Response
         js = """
      function show_user(by_url) {
@@ -182,6 +177,7 @@ class HypothesisStream:
         self.by_url = 'no'
 
     def add_row(self, row, selected_user=None, selected_tags=None):
+        """Add one API result to this instance."""
         raw = HypothesisRawAnnotation(row)
         if len(raw.references):
             ref = raw.references[0]
@@ -200,11 +196,13 @@ class HypothesisStream:
         self.uri_html_annotations[uri].append( html_annotation )
 
     def sort(self):
+        """Order URIs by most recent update."""
         sorted_uri_updates = sorted(self.uri_updates.items(), key=operator.itemgetter(1), reverse=True)
         for update in sorted_uri_updates:
             self.uris_by_recent_update.append( update[0] )
 
     def init_tag_url(self, limit=None, selected_user=None):
+        """Construct the base URL for a tag filter."""
         url = '/stream.alt?user='
         if selected_user is not None:
             url += selected_user
@@ -215,6 +213,7 @@ class HypothesisStream:
         return url
 
     def make_quote_html(self,raw):
+        """Render an annotation's quote."""
         quote = ''
         target = raw.target
         try:
@@ -223,7 +222,7 @@ class HypothesisStream:
           if isinstance(target,types.ListType) and len(target) == 0:
               return quote
           dict = {}
-          if isinstance(target,types.ListType) and len(target) > 0:
+          if isinstance(target,types.ListType) and len(target) > 0:  # empirically observed it can be a list or not
               dict = target[0]
           else:
               dict = target
@@ -239,6 +238,7 @@ class HypothesisStream:
         return quote
 
     def make_text_html(self, raw):
+        """Render an annotation's text."""
         text = raw.text
         if raw.is_page_note:
             text = '<span title="Page Note" class="h-icon-insert-comment"></span> ' + text
@@ -247,6 +247,7 @@ class HypothesisStream:
 
 
     def make_tag_html(self, raw, selected_user=None, selected_tags=None):
+        """Render an annotation's tags."""
         row_tags = raw.tags
         if len(row_tags) == 0:
             return ''
@@ -271,16 +272,18 @@ class HypothesisStream:
         return '<ul>%s</ul>' % '\n'.join(tag_items)
 
     def get_active_user_data(self, q):
+        """Marshall data about active users."""
         if q.has_key('user'):
             user = q['user'][0]
-            user, picklist, userlist = self.format_active_users(user=user)
+            user, picklist, userlist = self.make_active_users_selectable(user=user)
         else:
-            user, picklist, userlist = self.format_active_users(user=None)
+            user, picklist, userlist = self.make_active_users_selectable(user=None)
         userlist = [x[0] for x in userlist]
         return user, picklist, userlist
 
     @staticmethod
     def alt_stream(request):
+        """Entry point called from views.py (in H dev env) or h.py in this project."""
         limit = 200
         q = urlparse.parse_qs(request.query_string)
         h_stream = HypothesisStream(limit)
@@ -311,6 +314,7 @@ class HypothesisStream:
         return Response(html.encode('utf-8'))
 
     def display_url(self, html_annotation, uri):
+        """Render an annotation's URI."""
         dt_str = html_annotation.raw.updated
         dt = datetime.strptime(dt_str[0:16], "%Y-%m-%dT%H:%M")
         when = HypothesisUtils.friendly_time(dt)
@@ -327,6 +331,7 @@ class HypothesisStream:
         return s
 
     def display_html_annotation(self, html_annotation=None, first=None, uri=None, is_reply=None):
+            """Assemble rendered parts of an annotation into one HTML element."""
             s = ''
             if first:
                 s = self.display_url(html_annotation, uri)
@@ -367,7 +372,7 @@ class HypothesisStream:
             return s
 
     def make_alt_stream(self, user=None, tags=None):
-
+        """Do requested API search, organize results."""
         bare_search_url = '%s/search?limit=%s' % ( HypothesisUtils().api_url, self.limit )
         parameterized_search_url = bare_search_url
 
@@ -381,10 +386,6 @@ class HypothesisStream:
         response = requests.get(parameterized_search_url)
 
         rows = response.json()['rows']
-
-        #unique_urls = set()
-        #for row in rows:
-        #    unique_urls.add(row['uri'])
 
         for row in rows:
            self.add_row(row, selected_user=user, selected_tags=tags)
@@ -400,7 +401,8 @@ class HypothesisStream:
                 s += self.display_html_annotation(html_annotation,  first=first, uri=uri, is_reply=False)
         return s
 
-    def format_active_users(self, user=None):
+    def make_active_users_selectable(self, user=None):
+        """Enumerate active users, enable selection of one."""
         active_users = HypothesisUtils().get_active_users()
         most_active_user = active_users[0][0]
         select = ''
@@ -419,6 +421,7 @@ class HypothesisStream:
 
     @staticmethod
     def alt_stream_template(args):
+        """Temporarily here to consolidate assets in this file."""
         return u"""<html>
 <head>
     <link rel="stylesheet" href="https://hypothes.is/assets/styles/app.min.css" /> 
@@ -455,6 +458,7 @@ class HypothesisStream:
 class HypothesisRawAnnotation:
     
     def __init__(self, row):
+        """Encapsulate one row of a Hypothesis API search."""
         self.id = row['id']
         self.updated = row['updated'][0:19]
         self.user = row['user'].replace('acct:','').replace('@hypothes.is','')
@@ -516,3 +520,17 @@ class HypothesisHtmlAnnotation:
         self.text_html = h_stream.make_text_html(raw)
         self.tag_html = h_stream.make_tag_html(raw,  selected_user=selected_user, selected_tags=selected_tags)
         self.raw=raw
+
+    """ 
+    a sample link structure in an annotation
+
+    "link": [
+    {
+        "href": "http://thedeadcanary.wordpress.com/2014/05/11/song-of-myself/"
+    }, 
+    {
+        "href": "http://thedeadcanary.wordpress.com/2014/05/11/song-of-myself/", 
+        "type": "", 
+        "rel": "canonical"
+    }, 
+    """
