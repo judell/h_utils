@@ -5,7 +5,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>cfa65d87-9248-4827-946e-292464cdf292</ProjectGuid>
     <ProjectHome>.</ProjectHome>
-    <StartupFile>h.py</StartupFile>
+    <StartupFile>test.py</StartupFile>
     <SearchPath>..\..\..\python-google-spreadsheet\</SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
     <OutputPath>.</OutputPath>
@@ -24,15 +24,24 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="get_all_annos.py" />
+    <Compile Include="get_all_users.py">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="h.py" />
     <Compile Include="h_util.py" />
     <Compile Include="doi_aliases.py">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="drive.py">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="reports.py" />
     <Compile Include="test.py">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="users.py" />
+    <Compile Include="update_annos.py">
+      <SubType>Code</SubType>
+    </Compile>
   </ItemGroup>
   <ItemGroup>
     <InterpreterReference Include="{2af0f10d-7135-4994-9156-5d01c9c11b7e}\2.7" />

@@ -17,18 +17,6 @@ port = 8080
 host_port = 'http://' + host + ':' + str(port)
 alt_stream = 'https://alt-stream.dokku.hypothes.is'
 
-def dispatch(request):
-    q = urlparse.parse_qs(request.query_string)
-    if q.has_key('method'):
-        if q['method'][0] == 'urlfeed':
-            return urlfeed(request)
-        if q['method'][0] == 'feed':
-            return feed(request)
-        if q['method'][0] == 'activity':
-            return activity(request)
-        if q['method'][0] == 'multi_tag':
-            return multi_tag(request)
-
 def feed(request):
     """Temporary until official H Atom feed."""
     facet = 'tags'
@@ -148,8 +136,6 @@ if __name__ == '__main__':
     from pyramid.response import Response
 
     config = Configurator()
-    config.add_route('dispatch', '/')
-    config.add_view(dispatch, route_name='dispatch')
 
     config.add_route('feed', '/feed')
     config.add_view(feed, route_name='feed')

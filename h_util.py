@@ -12,7 +12,7 @@ except ImportError:
 
 
 class HypothesisUtils:
-    def __init__(self, username=None, password=None):
+    def __init__(self, username=None, password=None, max_results=None):
         self.app_url = 'https://hypothes.is/app'
         self.api_url = 'https://hypothes.is/api'
         self.query_url = 'https://hypothes.is/api/search?{query}'
@@ -20,6 +20,7 @@ class HypothesisUtils:
         self.via_url = 'https://via.hypothes.is'
         self.username = username
         self.password = password
+        self.max_results = max_results
 
     def login(self):
         """Request an assertion, exchange it for an auth token."""
@@ -44,6 +45,8 @@ class HypothesisUtils:
             r = requests.get(h_url).json()
             rows = r.get('rows')
             params['offset'] += len(rows)
+            if params['offset'] > self.max_results:
+                break
             if len(rows) is 0:
                 break
             for row in rows:
