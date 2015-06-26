@@ -170,22 +170,19 @@ class HypothesisUtils:
 
 class HypothesisStream:
 
-    def __init__(self, limit=None):
+    def __init__(self, limit=None, ref_dict=None, anno_dict=None):
         self.uri_html_annotations = defaultdict(list)
         self.uri_updates = {}
         self.uris_by_recent_update = []
         self.uri_references = {}
         self.limit = limit
-        self.conversations = {}
         self.by_url = 'no'
+        self.ref_dict = {} if ref_dict is None else ref_dict
+        self.anno_dict = {} if anno_dict is None else anno_dict
 
     def add_row(self, row, selected_user=None, selected_tags=None):
         """Add one API result to this instance."""
         raw = HypothesisRawAnnotation(row)
-        if len(raw.references):
-            ref = raw.references[0]
-            self.conversations[ref] = HypothesisHtmlAnnotation(self, raw, selected_tags, selected_user)
-            return
 
         uri = raw.uri
         updated = raw.updated
@@ -289,7 +286,11 @@ class HypothesisStream:
         """Entry point called from views.py (in H dev env) or h.py in this project."""
         limit = 200
         q = urlparse.parse_qs(request.query_string)
-        h_stream = HypothesisStream(limit)
+        s = open('ref_dict.json').read()
+        ref_dict = json.loads(s)
+        s = open('anno_dict.json').read()
+        anno_dict = json.loads(s)
+        h_stream = HypothesisStream(limit, anno_dict=anno_dict, ref_dict=ref_dict)
         if q.has_key('tags'):
             tags = q['tags'][0].split(',')
             tags = [t.strip() for t in tags]
@@ -360,15 +361,19 @@ class HypothesisStream:
                 s += """<p class="annotation-quote">%s</p>"""  % quote_html
         
             if text_html != '':
-                s += """<p class="stream-text">%s</p>""" %  (text_html)
+                s += """<p class="stream-text">%s (%s)</p>""" %  (text_html, html_annotation.raw.user)
         
             if tag_html != '':
                 s += '<p class="stream-tags">%s</p>' % tag_html
         
             annotation_id = html_annotation.raw.id
-            if self.conversations.has_key(annotation_id):
-                anno = self.conversations[annotation_id]
-                s += self.display_html_annotation(anno, first=False, uri=uri, is_reply=True)
+            if self.ref_dict.has_key(annotation_id):
+                #anno = self.conversations[annotation_id]
+                ref_id = self.ref_dict[annotation_id][0]
+                row = self.anno_dict[ref_id]
+                raw = HypothesisRawAnnotation(row)
+                html_reference = HypothesisHtmlAnnotation(self, raw, selected_tags=html_annotation.selected_tags, selected_user=html_annotation.selected_user)
+                self.display_html_annotation(html_reference, first=False, uri=uri, is_reply=True)
 
             s += '</div>'
 
@@ -397,10 +402,11 @@ class HypothesisStream:
         s = ''
         for uri in self.uris_by_recent_update:
             html_annotations = self.uri_html_annotations[uri]
-
             for i in range(len(html_annotations)):
                 first = ( i == 0 )
                 html_annotation = html_annotations[i]
+                if len(html_annotation.raw.references) > 0:
+                    continue
                 s += self.display_html_annotation(html_annotation,  first=first, uri=uri, is_reply=False)
         return s
 
@@ -523,6 +529,8 @@ class HypothesisHtmlAnnotation:
         self.text_html = h_stream.make_text_html(raw)
         self.tag_html = h_stream.make_tag_html(raw,  selected_user=selected_user, selected_tags=selected_tags)
         self.raw=raw
+        self.selected_tags=selected_tags
+        self.selected_user=selected_user
 
     """ 
     a sample link structure in an annotation
