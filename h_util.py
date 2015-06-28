@@ -1,4 +1,4 @@
-import requests, json, types, re, operator, traceback
+import requests, json, types, re, operator, traceback, thread, time
 from pyramid.response import Response
 from datetime import datetime
 from collections import defaultdict
@@ -37,6 +37,11 @@ class HypothesisUtils:
                          cookies=cookies, headers=headers))
         self.token =  r.content
 
+    def search_refs(self, id):
+        """Get references for id."""
+        refs = self.call_search_api( {'references':id } )
+        return refs['rows']
+ 
     def search_all(self):
         """Get all annotations."""
         params = {'limit':200, 'offset':0 }
@@ -174,18 +179,20 @@ class HypothesisStream:
         self.uri_html_annotations = defaultdict(list)
         self.uri_updates = {}
         self.uris_by_recent_update = []
-        self.uri_references = {}
         self.limit = limit
-        self.conversations = {}
         self.by_url = 'no'
+        self.selected_tags = None
+        self.selected_user = None
+        self.ref_parents = json.loads(open('ref_parents.json').read())
+        self.ref_children = json.loads(open('ref_children.json').read())
+        self.anno_dict = json.loads(open('anno_dict.json').read())
+        self.current_thread = ''
+        self.displayed_in_thread = defaultdict(bool)
+        thread.start_new_thread(self.make_indexes, ())
 
-    def add_row(self, row, selected_user=None, selected_tags=None):
+    def add_row(self, row):
         """Add one API result to this instance."""
         raw = HypothesisRawAnnotation(row)
-        if len(raw.references):
-            ref = raw.references[0]
-            self.conversations[ref] = HypothesisHtmlAnnotation(self, raw, selected_tags, selected_user)
-            return
 
         uri = raw.uri
         updated = raw.updated
@@ -195,7 +202,7 @@ class HypothesisStream:
         else:
             self.uri_updates[uri] = updated
 
-        html_annotation = HypothesisHtmlAnnotation(self, raw, selected_tags, selected_user)
+        html_annotation = HypothesisHtmlAnnotation(self, raw)
         self.uri_html_annotations[uri].append( html_annotation )
 
     def sort(self):
@@ -204,16 +211,22 @@ class HypothesisStream:
         for update in sorted_uri_updates:
             self.uris_by_recent_update.append( update[0] )
 
-    def init_tag_url(self, limit=None, selected_user=None):
+    def init_tag_url(self):
         """Construct the base URL for a tag filter."""
         url = '/stream.alt?user='
-        if selected_user is not None:
-            url += selected_user
+        if self.selected_user is not None:
+            url += self.selected_user
         url += '&by_url=' + self.by_url
         url += '&limit='
-        if limit is not None:
-            url += str(limit)
+        if self.limit is not None:
+            url += str(self.limit)
         return url
+
+    def get_child_refs(self,id):
+        return self.ref_children[id] if self.ref_children.has_key(id) else []
+
+    def get_parent_refs(self,id):
+        return self.ref_parents[id] if self.ref_parents.has_key(id) else []
 
     def make_quote_html(self,raw):
         """Render an annotation's quote."""
@@ -249,19 +262,19 @@ class HypothesisStream:
         return text
 
 
-    def make_tag_html(self, raw, selected_user=None, selected_tags=None):
+    def make_tag_html(self, raw):
         """Render an annotation's tags."""
         row_tags = raw.tags
         if len(row_tags) == 0:
             return ''
-        if selected_tags is None:
-            selected_tags = ()
+        if self.selected_tags is None:
+            self.selected_tags = ()
 
         tag_items = []
         for row_tag in row_tags:
-            tags = list(selected_tags)
-            url = self.init_tag_url(selected_user=selected_user)
-            if row_tag in selected_tags:
+            tags = list(self.selected_tags)
+            url = self.init_tag_url()
+            if row_tag in self.selected_tags:
                 klass = "selected-tag-item"
                 tags.remove(row_tag)
                 url += '&tags=' + ','.join(tags)
@@ -289,6 +302,8 @@ class HypothesisStream:
         """Entry point called from views.py (in H dev env) or h.py in this project."""
         limit = 200
         q = urlparse.parse_qs(request.query_string)
+        s = open('ref_dict.json').read()
+        ref_dict = json.loads(s)
         h_stream = HypothesisStream(limit)
         if q.has_key('tags'):
             tags = q['tags'][0].split(',')
@@ -316,11 +331,15 @@ class HypothesisStream:
         html = HypothesisStream.alt_stream_template( {'head':head,  'main':body} )
         return Response(html.encode('utf-8'))
 
-    def display_url(self, html_annotation, uri):
-        """Render an annotation's URI."""
-        dt_str = html_annotation.raw.updated
+    def show_friendly_time(self, updated):
+        dt_str = updated
         dt = datetime.strptime(dt_str[0:16], "%Y-%m-%dT%H:%M")
         when = HypothesisUtils.friendly_time(dt)
+        return when
+
+    def display_url(self, html_annotation, uri):
+        """Render an annotation's URI."""
+        when = self.show_friendly_time(html_annotation.raw.updated)
         doc_title = html_annotation.raw.doc_title
         via_url = HypothesisUtils().via_url
         s = '<div class="stream-url">'
@@ -333,18 +352,14 @@ class HypothesisStream:
 </div>""" % when
         return s
 
-    def display_html_annotation(self, html_annotation=None, first=None, uri=None, is_reply=None):
+    def make_html_annotation(self, html_annotation=None, level=None):
             """Assemble rendered parts of an annotation into one HTML element."""
             s = ''
-            if first:
-                s = self.display_url(html_annotation, uri)
         
-            if is_reply:
-                s += '<div class="stream-reply">'
+            if level > 1:
+                s += '<div class="reply-%s">' % level
             else:
-                s += '<div class="paper stream-annotation">'
-
-            #s += '<p>' + html_annotation.raw.id + '</p>'
+                s += '<div class="stream-annotation">' 
         
             if self.by_url == 'yes':
                 user = html_annotation.raw.user
@@ -360,29 +375,38 @@ class HypothesisStream:
                 s += """<p class="annotation-quote">%s</p>"""  % quote_html
         
             if text_html != '':
-                s += """<p class="stream-text">%s</p>""" %  (text_html)
+                s += """<p class="stream-text">%s</p>""" %  text_html 
         
             if tag_html != '':
                 s += '<p class="stream-tags">%s</p>' % tag_html
-        
-            annotation_id = html_annotation.raw.id
-            if self.conversations.has_key(annotation_id):
-                anno = self.conversations[annotation_id]
-                s += self.display_html_annotation(anno, first=False, uri=uri, is_reply=True)
+
+            user_sig = html_annotation.raw.user if level > 0 else ''
+            time_sig = self.show_friendly_time(html_annotation.raw.updated) if level > 0 else ''
+            s += '<p class="user-sig">%s %s</a>' % ( user_sig, time_sig ) if level > 0 else ''
 
             s += '</div>'
 
             return s
+
+    def make_ref_html(self, anno_dict, parent_ref):
+        parent_row = anno_dict[parent_ref]
+        parent_raw = HypothesisRawAnnotation(parent_row)
+        parent_html = HypothesisHtmlAnnotation(self, parent_raw)
+        return parent_html
 
     def make_alt_stream(self, user=None, tags=None):
         """Do requested API search, organize results."""
         bare_search_url = '%s/search?limit=%s' % ( HypothesisUtils().api_url, self.limit )
         parameterized_search_url = bare_search_url
 
+        anno_dict = json.loads(open('anno_dict.json').read())
+
         if user is not None:
+            self.selected_user = user
             parameterized_search_url += '&user=' + user
 
         if tags is not None:
+            self.selected_tags = tags
             for tag in tags:
                 parameterized_search_url += '&tags=' + tag
 
@@ -391,18 +415,59 @@ class HypothesisStream:
         rows = response.json()['rows']
 
         for row in rows:
-           self.add_row(row, selected_user=user, selected_tags=tags)
+           self.add_row(row)
         self.sort()
 
         s = ''
         for uri in self.uris_by_recent_update:
             html_annotations = self.uri_html_annotations[uri]
-
             for i in range(len(html_annotations)):
                 first = ( i == 0 )
                 html_annotation = html_annotations[i]
-                s += self.display_html_annotation(html_annotation,  first=first, uri=uri, is_reply=False)
+                s += self.display_url(html_annotation, uri)  
+
+                id = html_annotation.raw.id
+
+                s += '<div class="paper">'
+
+                if self.ref_parents.has_key(id):   # if part of thread, display whole thread
+                    id = self.find_thread_root(id)
+                    if id is not None and self.displayed_in_thread[id] == False:
+                        self.current_thread = ''
+                        self.show_thread(id, level=1)
+                        s += self.current_thread
+               
+                if self.displayed_in_thread[id] == False:
+                    s += self.make_html_annotation(html_annotation, level=0)
+
+                s += '</div>'
+
+
+
         return s
+
+    def find_thread_root(self, id):
+        if self.ref_parents.has_key(id) == False:
+            return None
+        if self.ref_parents[id] == '':
+            return None
+        id = self.ref_parents[id]
+        while id != '':
+            if self.ref_parents.has_key(id) and self.ref_parents[id] != '':
+                id = self.ref_parents[id]
+            else:
+                return id
+
+    def show_thread(self, id, level=1):
+        self.displayed_in_thread[id] = True
+        row = self.anno_dict[id]
+        raw = HypothesisRawAnnotation(row)
+        html_annotation = HypothesisHtmlAnnotation(self, raw)
+        self.current_thread += self.make_html_annotation(html_annotation, level)
+        if self.ref_children.has_key(id) == False:
+            return
+        for child in self.ref_children[id]:
+            self.show_thread(child, level + 1 )
 
     def make_active_users_selectable(self, user=None):
         """Enumerate active users, enable selection of one."""
@@ -438,7 +503,12 @@ class HypothesisStream:
     .stream-text {{ margin-bottom: 4pt; /*margin-left:7%;*/ word-wrap: break-word }}
     .stream-tags {{ margin-bottom: 10pt; }}
     .stream-user {{ font-weight: bold; margin-bottom: 4pt; font-style:normal}}
-    .stream-reply {{ margin-left:2%; margin-top:10px; border-left: 1px dotted #969696; padding-left:10px }}
+    .user-sig {{ font-size:smaller }}
+    .reply-1 {{ margin-left:2%; margin-top:10px; border-left: 1px dotted #969696; padding-left:10px }}
+    .reply-2 {{ margin-left:4%; margin-top:10px; border-left: 1px dotted #969696; padding-left:10px }}
+    .reply-3 {{ margin-left:6%; margin-top:10px; border-left: 1px dotted #969696; padding-left:10px }}
+    .reply-4 {{ margin-left:8%; margin-top:10px; border-left: 1px dotted #969696; padding-left:10px }}
+    .reply-5 {{ margin-left:10%; margin-top:10px; border-left: 1px dotted #969696; padding-left:10px }}
     .stream-selector {{ float:right; }}
     .stream-picklist {{ margin-left: 20pt }}
     .stream-active-users-widget {{ margin-top:0;}}
@@ -457,6 +527,54 @@ class HypothesisStream:
 <script src="/stream.alt.js"></script>
 </body>
 </html> """.format(head=args['head'],main=args['main'])
+
+    def make_indexes(self):
+        while True:
+            time.sleep(60 * 5)
+            print 'updating'
+            self.update_anno_dict()
+            self.make_ref_dicts()
+            print 'sleeping'
+
+    def update_anno_dict(self):
+        f = open('anno_dict.json')
+        dict = json.loads(f.read())
+        f.close()
+
+        for row in HypothesisUtils(max_results=200).search_all():
+            id = row['id']
+            if dict.has_key(id) == False:
+                dict[id] = row
+                print 'new: ' + id
+
+        self.anno_dict = dict
+
+        s = json.dumps(dict)
+        f = open('anno_dict.json','w')
+        f.write(s)
+        f.close()
+
+    def make_ref_dicts(self):
+        f = open('anno_dict.json')
+        anno_dict = json.loads(f.read())
+        f.close()
+        rows = [anno_dict[key] for key in anno_dict.keys()]
+        raws = [HypothesisRawAnnotation(row) for row in rows]
+        ref_parents = defaultdict(str)
+        ref_children = defaultdict(list)
+
+        for raw in raws:
+            if len(raw.references):
+                ref= raw.references[-1]
+                ref_children[ref].append(raw.id)
+                ref_parents[raw.id] = ref
+
+        self.ref_children = ref_children
+        self.ref_parents = ref_parents;
+        return
+        
+        
+
 
 class HypothesisRawAnnotation:
     
@@ -518,10 +636,10 @@ class HypothesisRawAnnotation:
 
 
 class HypothesisHtmlAnnotation:
-    def __init__(self, h_stream, raw, selected_tags, selected_user):
+    def __init__(self, h_stream, raw):
         self.quote_html = h_stream.make_quote_html(raw)
         self.text_html = h_stream.make_text_html(raw)
-        self.tag_html = h_stream.make_tag_html(raw,  selected_user=selected_user, selected_tags=selected_tags)
+        self.tag_html = h_stream.make_tag_html(raw)
         self.raw=raw
 
     """ 
