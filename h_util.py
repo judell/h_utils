@@ -20,7 +20,8 @@ class HypothesisUtils:
         self.via_url = 'https://via.hypothes.is'
         self.username = username
         self.password = password
-        self.max_results = max_results
+        self.single_page_limit = 200  # per-page, the api honors limit= up to (currently) 200
+        self.multi_page_limit = 200 if max_results is None else max_results  # limit for paginated results
 
     def login(self):
         """Request an assertion, exchange it for an auth token."""
@@ -39,18 +40,26 @@ class HypothesisUtils:
 
     def search_refs(self, id):
         """Get references for id."""
-        refs = self.call_search_api( {'references':id } )
+        refs = self.search( {'references':id } )
         return refs['rows']
+
+    def search(self, params={}):
+        """Call search API with no pagination, return JSON."""
+        params['limit'] = self.single_page_limit
+        h_url = self.query_url.format(query=urlencode(params))
+        json = requests.get(h_url).json()
+        return json
  
-    def search_all(self):
-        """Get all annotations."""
-        params = {'limit':200, 'offset':0 }
+    def search_all(self, params={}):
+        """Call search API with pagination, return rows."""
+        params['limit'] = self.single_page_limit
+        params['offset'] = 0
         while True:
-            h_url = self.query_url.format(query=urlencode(params))
+            h_url = self.query_url.format(query=urlencode(params, True))
             r = requests.get(h_url).json()
             rows = r.get('rows')
             params['offset'] += len(rows)
-            if params['offset'] > self.max_results:
+            if params['offset'] > self.multi_page_limit:
                 break
             if len(rows) is 0:
                 break
@@ -104,15 +113,9 @@ class HypothesisUtils:
         r = requests.post(self.api_url + '/annotations', headers=headers, data=data)
         return r
 
-    def call_search_api(self, args={'limit':200}):
-        """Call search API with dictionary of params."""
-        h_url = self.query_url.format(query=urlencode(args))
-        json = requests.get(h_url).json()
-        return json
-
     def get_active_users(self):
         """Find users in results of a default API search."""
-        j = self.call_search_api()
+        j = self.search()
         users = defaultdict(int)
         rows = j['rows']
         for row in rows:
@@ -302,8 +305,6 @@ class HypothesisStream:
         """Entry point called from views.py (in H dev env) or h.py in this project."""
         limit = 200
         q = urlparse.parse_qs(request.query_string)
-        s = open('ref_dict.json').read()
-        ref_dict = json.loads(s)
         h_stream = HypothesisStream(limit)
         if q.has_key('tags'):
             tags = q['tags'][0].split(',')
@@ -396,25 +397,20 @@ class HypothesisStream:
 
     def make_alt_stream(self, user=None, tags=None):
         """Do requested API search, organize results."""
-        bare_search_url = '%s/search?limit=%s' % ( HypothesisUtils().api_url, self.limit )
-        parameterized_search_url = bare_search_url
+
+        params = { 'limit': self.limit }
 
         anno_dict = json.loads(open('anno_dict.json').read())
 
         if user is not None:
             self.selected_user = user
-            parameterized_search_url += '&user=' + user
+            params['user'] = user
 
         if tags is not None:
             self.selected_tags = tags
-            for tag in tags:
-                parameterized_search_url += '&tags=' + tag
+            params['tags'] = tags
 
-        response = requests.get(parameterized_search_url)
-
-        rows = response.json()['rows']
-
-        for row in rows:
+        for row in HypothesisUtils().search_all(params):
            self.add_row(row)
         self.sort()
 
@@ -442,8 +438,6 @@ class HypothesisStream:
 
                 s += '</div>'
 
-
-
         return s
 
     def find_thread_root(self, id):
@@ -460,6 +454,8 @@ class HypothesisStream:
 
     def show_thread(self, id, level=1):
         self.displayed_in_thread[id] = True
+        if self.anno_dict.has_key(id) == False:
+            return
         row = self.anno_dict[id]
         raw = HypothesisRawAnnotation(row)
         html_annotation = HypothesisHtmlAnnotation(self, raw)
@@ -541,7 +537,7 @@ class HypothesisStream:
         dict = json.loads(f.read())
         f.close()
 
-        for row in HypothesisUtils(max_results=200).search_all():
+        for row in HypothesisUtils().search_all():
             id = row['id']
             if dict.has_key(id) == False:
                 dict[id] = row
@@ -573,9 +569,6 @@ class HypothesisStream:
         self.ref_parents = ref_parents;
         return
         
-        
-
-
 class HypothesisRawAnnotation:
     
     def __init__(self, row):

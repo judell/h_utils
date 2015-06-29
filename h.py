@@ -54,7 +54,7 @@ def _feed(request,facet):
 
 def activity(request):
     """Quick and dirty report on recent activity: users/day, most-active users."""
-    j = HypothesisUtils().call_search_api()
+    j = HypothesisUtils().search()
     body = make_activity(j)
     return Response(body.encode('utf-8'))
 
