@@ -182,7 +182,7 @@ class HypothesisStream:
         self.uri_html_annotations = defaultdict(list)
         self.uri_updates = {}
         self.uris_by_recent_update = []
-        self.limit = limit
+        self.limit = 400
         self.by_url = 'no'
         self.selected_tags = None
         self.selected_user = None
@@ -191,7 +191,9 @@ class HypothesisStream:
         self.anno_dict = json.loads(open('anno_dict.json').read())
         self.current_thread = ''
         self.displayed_in_thread = defaultdict(bool)
-        thread.start_new_thread(self.make_indexes, ())
+        #thread.start_new_thread(self.make_indexes, ())
+        self.debug = False
+        self.log = ''
 
     def add_row(self, row):
         """Add one API result to this instance."""
@@ -357,10 +359,12 @@ class HypothesisStream:
             """Assemble rendered parts of an annotation into one HTML element."""
             s = ''
         
-            if level > 1:
-                s += '<div class="reply-%s">' % level
+            id = html_annotation.raw.id
+
+            if level > 0:
+                s += '<div id="%s" class="reply-%s">' % ( id, level )
             else:
-                s += '<div class="stream-annotation">' 
+                s += '<div id=%s" class="stream-annotation">' % id
         
             if self.by_url == 'yes':
                 user = html_annotation.raw.user
@@ -395,8 +399,15 @@ class HypothesisStream:
         parent_html = HypothesisHtmlAnnotation(self, parent_raw)
         return parent_html
 
+    def make_singleton_or_thread_html(self, id):
+        self.current_thread = ''
+        self.show_thread(id, level=0)
+        return self.current_thread
+
     def make_alt_stream(self, user=None, tags=None):
         """Do requested API search, organize results."""
+
+        self.debug = True
 
         params = { 'limit': self.limit }
 
@@ -424,17 +435,20 @@ class HypothesisStream:
 
                 id = html_annotation.raw.id
 
+                if self.debug: 
+                    self.log += '%s, %s\n' % ( uri, id )
+
                 s += '<div class="paper">'
 
                 if self.ref_parents.has_key(id):   # if part of thread, display whole thread
+                    if self.debug: self.log += '\t has parents\n'
                     id = self.find_thread_root(id)
+                    if self.debug: self.log += '\t root: %s\n' % id
                     if id is not None and self.displayed_in_thread[id] == False:
-                        self.current_thread = ''
-                        self.show_thread(id, level=1)
-                        s += self.current_thread
+                        s += self.make_singleton_or_thread_html(id)
                
-                if self.displayed_in_thread[id] == False:
-                    s += self.make_html_annotation(html_annotation, level=0)
+                if self.displayed_in_thread[id] == False:  # display singleton or thread root
+                        s += self.make_singleton_or_thread_html(id)
 
                 s += '</div>'
 
@@ -452,17 +466,20 @@ class HypothesisStream:
             else:
                 return id
 
-    def show_thread(self, id, level=1):
+    def show_thread(self, id, level=None):
         self.displayed_in_thread[id] = True
         if self.anno_dict.has_key(id) == False:
+            print '! not found in anno_dict: ' + id
             return
         row = self.anno_dict[id]
         raw = HypothesisRawAnnotation(row)
         html_annotation = HypothesisHtmlAnnotation(self, raw)
         self.current_thread += self.make_html_annotation(html_annotation, level)
         if self.ref_children.has_key(id) == False:
+            if self.debug: self.log += '\t has no children: %s\n' % id
             return
         for child in self.ref_children[id]:
+            if self.debug: self.log += '\t recursing on: %s\n' % id
             self.show_thread(child, level + 1 )
 
     def make_active_users_selectable(self, user=None):
