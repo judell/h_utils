@@ -1,4 +1,4 @@
-import requests, json, types, re, operator, traceback, thread, time
+import requests, json, types, re, operator, traceback, thread, time, redis
 from pyramid.response import Response
 from datetime import datetime
 from collections import defaultdict
@@ -178,7 +178,7 @@ class HypothesisUtils:
 
 class HypothesisStream:
 
-    def __init__(self, limit=None):
+    def __init__(self, limit=None, root=None):
         self.uri_html_annotations = defaultdict(list)
         self.uri_updates = {}
         self.uris_by_recent_update = []
@@ -186,12 +186,12 @@ class HypothesisStream:
         self.by_url = 'no'
         self.selected_tags = None
         self.selected_user = None
-        self.ref_parents = json.loads(open('ref_parents.json').read())
-        self.ref_children = json.loads(open('ref_children.json').read())
-        self.anno_dict = json.loads(open('anno_dict.json').read())
+        self.root = './' if root is None else root
+        self.ref_parents = json.loads(open(self.root + 'ref_parents.json').read())
+        self.ref_children = json.loads(open(self.root + 'ref_children.json').read())
+        self.anno_dict = None
         self.current_thread = ''
         self.displayed_in_thread = defaultdict(bool)
-        #thread.start_new_thread(self.make_indexes, ())
         self.debug = False
         self.log = ''
 
@@ -307,7 +307,8 @@ class HypothesisStream:
         """Entry point called from views.py (in H dev env) or h.py in this project."""
         limit = 200
         q = urlparse.parse_qs(request.query_string)
-        h_stream = HypothesisStream(limit)
+        h_stream = HypothesisStream(limit=limit,root='/home/jon/h/h/')
+        h_stream.anno_dict = redis.StrictRedis(host='h.jonudell.info',port=6379, db=0)
         if q.has_key('tags'):
             tags = q['tags'][0].split(',')
             tags = [t.strip() for t in tags]
@@ -332,6 +333,7 @@ class HypothesisStream:
             head += '<h1 class="stream-active-users-widget">urls recently annotated by {user} <span class="stream-picklist">{users}</span></h1>'.format(user=user, users=picklist)
             body = h_stream.make_alt_stream(user=user, tags=tags)
         html = HypothesisStream.alt_stream_template( {'head':head,  'main':body} )
+        h_stream.anno_dict.connection_pool.disconnect()
         return Response(html.encode('utf-8'))
 
     def show_friendly_time(self, updated):
@@ -385,9 +387,9 @@ class HypothesisStream:
             if tag_html != '':
                 s += '<p class="stream-tags">%s</p>' % tag_html
 
-            user_sig = html_annotation.raw.user if level > 0 else ''
-            time_sig = self.show_friendly_time(html_annotation.raw.updated) if level > 0 else ''
-            s += '<p class="user-sig">%s %s</a>' % ( user_sig, time_sig ) if level > 0 else ''
+            user_sig = html_annotation.raw.user 
+            time_sig = self.show_friendly_time(html_annotation.raw.updated) 
+            s += '<p class="user-sig">%s %s</a>' % ( user_sig, time_sig ) 
 
             s += '</div>'
 
@@ -407,11 +409,9 @@ class HypothesisStream:
     def make_alt_stream(self, user=None, tags=None):
         """Do requested API search, organize results."""
 
-        self.debug = True
+        #self.debug = True
 
         params = { 'limit': self.limit }
-
-        anno_dict = json.loads(open('anno_dict.json').read())
 
         if user is not None:
             self.selected_user = user
@@ -431,6 +431,8 @@ class HypothesisStream:
             for i in range(len(html_annotations)):
                 first = ( i == 0 )
                 html_annotation = html_annotations[i]
+                if html_annotation == '':
+                    continue
                 s += self.display_url(html_annotation, uri)  
 
                 id = html_annotation.raw.id
@@ -468,10 +470,10 @@ class HypothesisStream:
 
     def show_thread(self, id, level=None):
         self.displayed_in_thread[id] = True
-        if self.anno_dict.has_key(id) == False:
+        if self.anno_dict.get(id) == None:
             print '! not found in anno_dict: ' + id
             return
-        row = self.anno_dict[id]
+        row = json.loads(self.anno_dict.get(id))
         raw = HypothesisRawAnnotation(row)
         html_annotation = HypothesisHtmlAnnotation(self, raw)
         self.current_thread += self.make_html_annotation(html_annotation, level)
@@ -543,35 +545,22 @@ class HypothesisStream:
 
     def make_indexes(self):
         while True:
-            time.sleep(60 * 5)
             print 'updating'
             self.update_anno_dict()
             self.make_ref_dicts()
             print 'sleeping'
+            time.sleep(60 * 5)
 
     def update_anno_dict(self):
-        f = open('anno_dict.json')
-        dict = json.loads(f.read())
-        f.close()
-
         for row in HypothesisUtils().search_all():
             id = row['id']
-            if dict.has_key(id) == False:
-                dict[id] = row
+            if self.anno_dict.get(id) == None:
+                self.anno_dict.set(id, json.dumps(row))
                 print 'new: ' + id
-
-        self.anno_dict = dict
-
-        s = json.dumps(dict)
-        f = open('anno_dict.json','w')
-        f.write(s)
-        f.close()
+        return
 
     def make_ref_dicts(self):
-        f = open('anno_dict.json')
-        anno_dict = json.loads(f.read())
-        f.close()
-        rows = [anno_dict[key] for key in anno_dict.keys()]
+        rows = [json.loads(self.anno_dict.get(key)) for key in self.anno_dict.keys()]
         raws = [HypothesisRawAnnotation(row) for row in rows]
         ref_parents = defaultdict(str)
         ref_children = defaultdict(list)
@@ -582,8 +571,15 @@ class HypothesisStream:
                 ref_children[ref].append(raw.id)
                 ref_parents[raw.id] = ref
 
-        self.ref_children = ref_children
-        self.ref_parents = ref_parents;
+        s = json.dumps(ref_children)
+        f = open(self.root + 'ref_children.json','w')
+        f.write(s)
+        f.close()
+
+        s = json.dumps(ref_parents)
+        f = open(self.root + 'ref_parents.json','w')
+        f.write(s)
+        f.close()
         return
         
 class HypothesisRawAnnotation:
