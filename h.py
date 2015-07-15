@@ -150,7 +150,7 @@ if __name__ == '__main__':
     config.add_view(HypothesisStream.alt_stream, route_name='alt_stream')
 
     config.add_route('alt_stream_js', '/stream.alt.js')
-    config.add_view(HypothesisUtils.alt_stream_js, route_name='alt_stream_js')
+    config.add_view(HypothesisStream.alt_stream_js, route_name='alt_stream_js')
 
     app = config.make_wsgi_app()
     server = make_server(host, port, app)
