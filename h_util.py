@@ -6,6 +6,14 @@ from collections import defaultdict
 from markdown import markdown
 from bs4 import BeautifulSoup
 import urlparse
+from dateutil import parser
+from datetime import date, timedelta
+import matplotlib
+matplotlib.use('svg')
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
+import cStringIO, re
 
 try:
     from urllib.parse import urlencode
@@ -204,13 +212,13 @@ class HypothesisStream:
         self.anno_dict = redis.StrictRedis(host=self.redis_host,port=6379, db=0) 
         self.ref_parents = redis.StrictRedis(host=self.redis_host,port=6379, db=1) 
         self.ref_children = redis.StrictRedis(host=self.redis_host,port=6379, db=2) 
-        self.user_annos = redis.StrictRedis(host=self.redis_host,port=6379, db=3) 
+        self.user_anno_counts = redis.StrictRedis(host=self.redis_host,port=6379, db=3) 
         self.user_replies = redis.StrictRedis(host=self.redis_host,port=6379, db=4) 
         self.user_icons = redis.StrictRedis(host=self.redis_host,port=6379, db=5)
         self.uri_users = redis.StrictRedis(host=self.redis_host,port=6379, db=6)
-        #self.anno_dict = anno_dict()
-        #self.ref_parents = ref_parents()
-        #self.ref_children = ref_children()
+        self.user_annos = redis.StrictRedis(host=self.redis_host,port=6379, db=7)
+        #self.user_anno_counts = redis.StrictRedis(host=self.redis_host,port=6379, db=8) 
+        #self.user_replies = redis.StrictRedis(host=self.redis_host,port=6379, db=9) 
         self.current_thread = ''
         self.displayed_in_thread = defaultdict(bool)
         self.debug = False
@@ -224,7 +232,7 @@ class HypothesisStream:
         uri = raw.uri
         updated = raw.updated
         if self.uri_updates.has_key(uri) == True:  # track most-recent update per uri
-            if updated < self.uri_updates[uri]:
+            if updated > self.uri_updates[uri]:
                 self.uri_updates[uri] = updated
         else:
             self.uri_updates[uri] = updated
@@ -344,11 +352,21 @@ class HypothesisStream:
             head += '<h1>urls recently annotated</h1>'
             body = h_stream.make_alt_stream(user=None, tags=tags)
         else:
-           head = '<h1 class="stream-picklist">recently active users %s</h1>' % (picklist)
-           head += '<h1 class="url-view-toggle"><a href="/stream.alt?by_url=yes">view recent annotations by url</a></h1>'
-           head += '<h1 class="user-contributions">%s has contributed %s annotations, of which %s were replies</h1>' % (user, h_stream.user_annos.get(user), h_stream.user_replies.get(user) )
-           head += '<h1 class="stream-active-users-widget">these urls were recently annotated by %s</h1>' % user
-           body = h_stream.make_alt_stream(user=user, tags=tags)
+            head = '<h1 class="stream-picklist">recently active users %s</h1>' % (picklist)
+            head += '<h1 class="url-view-toggle"><a href="/stream.alt?by_url=yes">view recent annotations by url</a></h1>'
+            try:
+                timeline_counts, timeline_days = h_stream.make_timeline_data(user)
+                first_day = timeline_days[0]
+                timeline = h_stream.create_timeline(timeline_counts, timeline_days)
+                anno_counts = h_stream.user_anno_counts.get(user)
+                user_replies = h_stream.user_replies.get(user) 
+                head += '<h1 class="user-contributions">Since %s %s has contributed %s annotations, of which %s were replies</h1>' % (first_day, user, anno_counts, user_replies)
+                if len(timeline_days) > 15:
+                    head += timeline
+            except:
+                print traceback.format_exc()
+            head += '<h1 class="stream-active-users-widget">These urls were recently annotated by %s</h1>' % user
+            body = h_stream.make_alt_stream(user=user, tags=tags)
         html = HypothesisStream.alt_stream_template( {'head':head,  'main':body} )
         h_stream.anno_dict.connection_pool.disconnect()
         return Response(html.encode('utf-8'))
@@ -360,6 +378,7 @@ class HypothesisStream:
         return when
 
     def display_url(self, html_annotation, uri):
+        uri = uri.replace('https://via.hypothes.is/static/__shared/viewer/web/viewer.html?file=/id_/','')
         id = html_annotation.raw.id
         if self.displayed_in_thread[id]:
             return ''
@@ -456,16 +475,15 @@ class HypothesisStream:
         s = ''
         for uri in self.uris_by_recent_update:
             html_annotations = self.uri_html_annotations[uri]
-            for i in range(len(html_annotations)):
 
+            s += self.display_url(html_annotations[0], uri)  
 
-                first = ( i == 0 )
+            for i in range(len(html_annotations[1:])):
+
                 html_annotation = html_annotations[i]
                 if html_annotation == '':
                     continue
-                
-                s += self.display_url(html_annotation, uri)  
-
+             
                 id = html_annotation.raw.id
 
                 if self.debug: 
@@ -584,6 +602,8 @@ class HypothesisStream:
     .user-contributions: {{ clear:left }}
     .user-image-small {{ height: 20px; vertical-align:middle; margin-right:4px; padding:0 }}
     .other-users {{ font-size:smaller;font-style:italic }}
+    .stream-active-users-widget {{ margin-top: 20px }}
+    .paper {{ margin:15px; border-color:rgb(192, 184, 184); border-width:thin;border-style:solid }}
     </style>
 </head>
 <body class="ng-scope">
@@ -595,10 +615,16 @@ class HypothesisStream:
 
     def make_indexes(self):
         while True:
-            print 'updating'
-            self.update_uri_users_dict()
-            self.update_anno_and_ref_dicts()
-            time.sleep(15)
+            try:
+                print 'updating'
+                rows = HypothesisUtils().search_all()
+                rows = list(rows)
+                self.update_uri_users_dict(rows)
+                self.update_anno_and_ref_and_photo_dicts(rows)
+                self.update_user_annos(rows)
+                time.sleep(15)
+            except:
+                print traceback.format_exc()
             
     def increment_index(self, idx, key):
         value = idx.get(key)
@@ -606,6 +632,8 @@ class HypothesisStream:
             value = int(value)
             value += 1
             idx.set(key,value)
+        else:
+            idx.set(key,1)
 
     def get_user_twitter_photo(self,user):
         generic = 'http://jonudell.net/h/generic-user-icon.jpg'
@@ -622,9 +650,7 @@ class HypothesisStream:
         print user, url
         return url
 
-    def update_uri_users_dict(self):
-        rows = HypothesisUtils().search_all()
-        
+    def update_uri_users_dict(self,rows):
         for row in rows:
             raw = HypothesisRawAnnotation(row) 
             if self.uri_users.get(raw.uri) is None:
@@ -634,22 +660,23 @@ class HypothesisStream:
                 users.append(raw.user)
                 self.uri_users.set(raw.uri, json.dumps(users))
       
-    def update_anno_and_ref_dicts(self):
-        rows = HypothesisUtils().search_all()
-
+    def update_anno_and_ref_and_photo_dicts(self,rows):
         for row in rows:
             raw = HypothesisRawAnnotation(row) 
             id = raw.id
             user = raw.user
             refs = raw.references
             if self.anno_dict.get(id) == None:
+                print 'adding %s to anno_dict' %  id 
                 self.anno_dict.set(id, json.dumps(row))
-                self.increment_index(self.user_annos, user)
+                print 'incrementing anno count for %s' %  user
+                self.increment_index(self.user_anno_counts, user)
                 if len(refs):
+                    print 'incrementing ref count for %s' %  user    
                     self.increment_index(self.user_replies, user)
-                print 'new: ' + id
-            if self.user_icons.get(user) is None:
-                self.user_icons.set(user, self.get_user_twitter_photo(user))
+                if self.user_icons.get(user) is None:
+                    print 'adding photo for %s' %  user
+                    self.user_icons.set(user, self.get_user_twitter_photo(user))
 
         for row in rows:
             raw = HypothesisRawAnnotation(row) 
@@ -664,12 +691,80 @@ class HypothesisStream:
                     else:
                         children = []
                     if raw.id not in children:
+                        print 'adding %s as child of %s for %s' % ( raw.id, ref, user) 
                         children.append(id)
                         self.ref_children.set(ref, json.dumps(children))           
                     self.ref_parents.set(id, ref)
                 except:
                     print traceback.format_exc()
                     print 'id: ' + ref
+
+    def update_user_annos(self,rows):
+        for row in rows:
+            raw = HypothesisRawAnnotation(row)
+            user = raw.user
+            annos_json = self.user_annos.get(user)
+            if annos_json is None:
+                annos = []
+            else:
+                annos = json.loads(annos_json)
+            ids = [a['id'] for a in annos]
+            if raw.id not in ids:
+                print 'adding %s to %s' % ( row['id'], user) 
+                annos.append(row)
+                self.user_annos.set(user, json.dumps(annos))
+
+    def create_timeline(self,counts, days):
+        dataset = pd.DataFrame( { 'Day': pd.Series(days),
+                                 'Counts': pd.Series(counts) } )
+        sns.set_style("whitegrid")
+        f, ax = plt.subplots(figsize=(8,4))
+        ax.bar(dataset.index, dataset.Counts, width=.8, color="#278DBC", align="center")
+        ax.set(xlim=(-1, len(dataset)))
+        ax.xaxis.grid(False)
+        ax.yaxis.grid(False)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        sns.despine(left=True)
+        ram = cStringIO.StringIO()
+        plt.savefig(ram,format='svg')
+        plt.close()
+        s = ram.getvalue()
+        ram.close()
+        s = re.sub('<svg[^<]+>', '<svg preserveAspectRatio="none" height="100%" version="1.1" viewBox="0 0 576 288" width="100%" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">', s)
+        s = '<div style="width:100%;height:60px">' + s + '</div>'
+        return s
+
+    def make_timeline_data(self,user):
+        annos = json.loads(self.user_annos.get(user))
+        dates = [a['updated'] for a in annos]
+        dates = [parser.parse(date) for date in dates]
+        dates.sort()
+        dates = dates
+    
+        first = dates[0]
+        last = dates[-1]
+    
+        def perdelta(start, end, delta):
+            curr = start
+            while curr < end:
+                yield curr.strftime('%Y-%m-%d')
+                curr += delta
+    
+        day_dict = defaultdict(int)
+        for date in dates:
+            day = date.strftime('%Y-%m-%d')
+            day_dict[day] += 1
+    
+        for day in perdelta(first, last, timedelta(days=1)):
+            if day_dict.has_key(day) == False:
+                day_dict[day] = 0
+    
+        days = day_dict.keys()
+        days.sort()
+        counts = [day_dict[day] for day in days]
+        return counts, days
+
         
 class HypothesisRawAnnotation:
     
