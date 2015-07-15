@@ -165,7 +165,7 @@ class HypothesisUtils:
     @staticmethod
     def friendly_time(dt):
         """Represent a timestamp in a simple, friendly way."""
-        now = datetime.now()
+        now = datetime.utcnow()
         delta = now - dt
 
         minute = 60
