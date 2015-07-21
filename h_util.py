@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup
 import urlparse
 from dateutil import parser
 from datetime import date, timedelta
+import numpy
 import matplotlib
 matplotlib.use('svg')
 import matplotlib.pyplot as plt
@@ -76,7 +77,7 @@ class HypothesisUtils:
             for row in rows:
                 yield row
 
-    def make_annotation_payload_with_target(self, url, start_pos, end_pos, prefix, quote, suffix, text, tags, link):
+    def make_annotation_payload_with_target(self, url, start_pos, end_pos, prefix, exact, suffix, text, tags, link):
         """Create JSON payload for API call."""
         payload = {
             "uri": url,
@@ -103,7 +104,7 @@ class HypothesisUtils:
                         {
                         "type": "TextQuoteSelector", 
                         "prefix": prefix,
-                        "exact": quote,
+                        "exact": exact,
                         "suffix": suffix
                         },
                     ]
@@ -134,10 +135,10 @@ class HypothesisUtils:
         return payload
 
     def create_annotation_with_target(self, url=None, start_pos=None, end_pos=None, prefix=None, 
-               quote=None, suffix=None, text=None, tags=None, link=None):
+               exact=None, suffix=None, text=None, tags=None, link=None):
         """Call API with token and payload, create annotation"""
         headers = {'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json;charset=utf-8' }
-        payload = self.make_annotation_payload_with_target(url, start_pos, end_pos, prefix, quote, suffix, text, tags, link)
+        payload = self.make_annotation_payload_with_target(url, start_pos, end_pos, prefix, exact, suffix, text, tags, link)
         data = json.dumps(payload, ensure_ascii=False)
         r = requests.post(self.api_url + '/annotations', headers=headers, data=data)
         return r
@@ -363,6 +364,7 @@ class HypothesisStream:
                 head += '<h1 class="user-contributions">Since %s %s has contributed %s annotations, of which %s were replies</h1>' % (first_day, user, anno_counts, user_replies)
                 if len(timeline_days) > 15:
                     head += timeline
+                head += '<div class="user-tag-cloud">%s</div>' % h_stream.make_tag_cloud(user)
             except:
                 print traceback.format_exc()
             head += '<h1 class="stream-active-users-widget">These urls were recently annotated by %s</h1>' % user
@@ -401,7 +403,8 @@ class HypothesisStream:
             users = self.uri_users.get(uri)
             if users is not None and len(users) > 1:
                 users = set(json.loads(users))
-                users.remove(html_annotation.raw.user)
+                if html_annotation.raw.user in users:
+                    users.remove(html_annotation.raw.user)
                 if len(users):
                     users = ['<a href="/stream.alt?by_url=no&user=%s">%s</a>' % (user, user) for user in users]
                     s += '<p class="other-users">also annotated by %s</p>' % ', '.join(users)
@@ -476,14 +479,13 @@ class HypothesisStream:
         for uri in self.uris_by_recent_update:
             html_annotations = self.uri_html_annotations[uri]
 
+
             s += self.display_url(html_annotations[0], uri)  
 
             for i in range(len(html_annotations[1:])):
 
                 html_annotation = html_annotations[i]
-                if html_annotation == '':
-                    continue
-             
+
                 id = html_annotation.raw.id
 
                 if self.debug: 
@@ -597,13 +599,18 @@ class HypothesisStream:
     img {{ max-width: 100% }}
     annotation-timestamp {{ margin-right: 20px }}
     img {{ padding:10px }}
-    a.tag-item {{ text-decoration: none; border: 1px solid #BBB3B3; border-radius: 2px; padding: 3px; color: #969696; background: #f9f9f9; }}
+    .tag-item {{ text-decoration: none; border: 1px solid #BBB3B3; border-radius: 2px; padding: 3px; color: #969696; background: #f9f9f9; }}
     a.selected-tag-item {{ rgb(215, 216, 212); padding:3px; color:black; border: 1px solid black;}}
     .user-contributions: {{ clear:left }}
     .user-image-small {{ height: 20px; vertical-align:middle; margin-right:4px; padding:0 }}
     .other-users {{ font-size:smaller;font-style:italic }}
     .stream-active-users-widget {{ margin-top: 20px }}
     .paper {{ margin:15px; border-color:rgb(192, 184, 184); border-width:thin;border-style:solid }}
+    .tag-cloud-item {{ border: none }}
+    .tag-cloud-0 {{ font-size:small }}
+    .tag-cloud-1 {{ font-size:normal }}
+    .tag-cloud-2 {{ font-size:large }}
+    .tag-cloud-3 {{ font-size:x-large }}
     </style>
 </head>
 <body class="ng-scope">
@@ -735,6 +742,32 @@ class HypothesisStream:
         s = '<div style="width:100%;height:60px">' + s + '</div>'
         return s
 
+    def format_tag_tuple(self, breaks, tag_tuple):
+        for i in range(len(breaks)):
+            if tag_tuple[1] > breaks[i]:
+                continue
+            return '<span class="tag-cloud-%d tag-item tag-cloud-item">%s</span>' % ( i, tag_tuple[0] )
+
+    def make_tag_cloud(self, user):
+        annos = json.loads(self.user_annos.get(user))
+        taglists = []
+        for a in annos:
+           if a.has_key('tags') and a['tags'] is not None:
+               taglists.append(a['tags'])
+        tagdict = defaultdict(int)
+        for taglist in taglists:
+            if taglist is None: continue
+            for tag in taglist:
+                tagdict[tag.lower()] += 1
+        tag_tuples = sorted(tagdict.items(), key=operator.itemgetter(0,1))
+        tag_tuples = [tag_tuple for tag_tuple in tag_tuples if tag_tuple[1] > 1]
+        tag_counts = [tag_tuple[1] for tag_tuple in tag_tuples]
+        bin_count = 3
+        histogram = numpy.histogram(tag_counts, bins=bin_count)
+        breaks = histogram[1]
+        formatted_tag_tuples = [self.format_tag_tuple(breaks, tag_tuple) for tag_tuple in tag_tuples]
+        return ' '.join(formatted_tag_tuples)
+               
     def make_timeline_data(self,user):
         annos = json.loads(self.user_annos.get(user))
         dates = [a['updated'] for a in annos]
@@ -793,6 +826,8 @@ class HypothesisRawAnnotation:
                 self.doc_title = t
         else:
             self.doc_title = self.uri
+        if self.doc_title is None:
+            self.doc_title = ''
         self.doc_title = self.doc_title.replace('"',"'")
         if self.doc_title == '': self.doc_title = 'untitled'
 
