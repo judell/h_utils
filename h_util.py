@@ -218,13 +218,10 @@ class HypothesisStream:
         self.user_icons = redis.StrictRedis(host=self.redis_host,port=6379, db=5)
         self.uri_users = redis.StrictRedis(host=self.redis_host,port=6379, db=6)
         self.user_annos = redis.StrictRedis(host=self.redis_host,port=6379, db=7)
-        #self.user_anno_counts = redis.StrictRedis(host=self.redis_host,port=6379, db=8) 
-        #self.user_replies = redis.StrictRedis(host=self.redis_host,port=6379, db=9) 
         self.current_thread = ''
         self.displayed_in_thread = defaultdict(bool)
         self.debug = False
         self.log = ''
-
 
     def add_row(self, row):
         """Add one API result to this instance."""
@@ -374,12 +371,14 @@ class HypothesisStream:
         return Response(html.encode('utf-8'))
 
     def show_friendly_time(self, updated):
+        """Return a friendly representation of an annotation's update timestamp."""
         dt_str = updated
         dt = datetime.strptime(dt_str[0:16], "%Y-%m-%dT%H:%M")
         when = HypothesisUtils.friendly_time(dt)
         return when
 
     def display_url(self, html_annotation, uri):
+        """Display a recently-annotated URL."""
         uri = uri.replace('https://via.hypothes.is/static/__shared/viewer/web/viewer.html?file=/id_/','')
         id = html_annotation.raw.id
         if self.displayed_in_thread[id]:
@@ -452,6 +451,7 @@ class HypothesisStream:
             return s
 
     def make_singleton_or_thread_html(self, id):
+        """Surely there's a better way to encapsulate the recursive show_thread() than this!"""
         self.current_thread = ''
         self.show_thread(id, level=0)
         return self.current_thread
@@ -502,6 +502,7 @@ class HypothesisStream:
         return s
 
     def find_thread_root(self, id):
+        """Walk up a chain of parents (if any) to their ancestor."""
         root = self.ref_parents.get(id)
         if root is None:
             return id
@@ -515,7 +516,8 @@ class HypothesisStream:
         return root
 
     def show_thread(self, id, level=None):
-        if self.displayed_in_thread[id]:
+        """Expect id to be standalone or the root of a thread. Display either."""
+        if self.displayed_in_thread[id]:  
             return
         if self.anno_dict.exists(id) == False:
             return
@@ -621,6 +623,7 @@ class HypothesisStream:
 </html> """.format(head=args['head'],main=args['main'])
 
     def make_indexes(self):
+        """A throwaway to help explore views of annotation data that might be interesting and useful."""
         while True:
             try:
                 print 'updating'
@@ -634,6 +637,7 @@ class HypothesisStream:
                 print traceback.format_exc()
             
     def increment_index(self, idx, key):
+        """I'm sure there's a more Pythonic way, too lazy to look."""
         value = idx.get(key)
         if value is not None:
             value = int(value)
@@ -643,6 +647,7 @@ class HypothesisStream:
             idx.set(key,1)
 
     def get_user_twitter_photo(self,user):
+        """For prototype purposes only."""
         generic = 'http://jonudell.net/h/generic-user-icon.jpg'
         r = requests.get('https://twitter.com/' + user)
         if r.status_code != 200:
@@ -658,6 +663,7 @@ class HypothesisStream:
         return url
 
     def update_uri_users_dict(self,rows):
+        """Map users to lists of URLs they have annotated."""
         for row in rows:
             raw = HypothesisRawAnnotation(row) 
             if self.uri_users.get(raw.uri) is None:
@@ -666,25 +672,18 @@ class HypothesisStream:
             if raw.user not in users:
                 users.append(raw.user)
                 self.uri_users.set(raw.uri, json.dumps(users))
-      
-    def update_anno_and_ref_and_photo_dicts(self,rows):
+
+    def update_photo_dicts(self,rows):
+        """Map user names (for prototype only) to Twitter photos."""
         for row in rows:
             raw = HypothesisRawAnnotation(row) 
             id = raw.id
-            user = raw.user
-            refs = raw.references
-            if self.anno_dict.get(id) == None:
-                print 'adding %s to anno_dict' %  id 
-                self.anno_dict.set(id, json.dumps(row))
-                print 'incrementing anno count for %s' %  user
-                self.increment_index(self.user_anno_counts, user)
-                if len(refs):
-                    print 'incrementing ref count for %s' %  user    
-                    self.increment_index(self.user_replies, user)
-                if self.user_icons.get(user) is None:
-                    print 'adding photo for %s' %  user
-                    self.user_icons.set(user, self.get_user_twitter_photo(user))
+            if self.user_icons.get(user) is None:
+                print 'adding photo for %s' %  user
+                self.user_icons.set(user, self.get_user_twitter_photo(user))
 
+    def update_ref_dicts(self,rows):
+        """Update ref_children and ref_parents."""
         for row in rows:
             raw = HypothesisRawAnnotation(row) 
             id = raw.id
@@ -705,8 +704,22 @@ class HypothesisStream:
                 except:
                     print traceback.format_exc()
                     print 'id: ' + ref
+      
+    def update_anno_dicts(self,rows):
+        """Map ids to annotations (JSON rows) in anno_dict, map per-user counts in user_anno_counts."""
+        for row in rows:
+            raw = HypothesisRawAnnotation(row) 
+            id = raw.id
+            user = raw.user
+            refs = raw.references
+            if self.anno_dict.get(id) == None:
+                print 'adding %s to anno_dict' %  id 
+                self.anno_dict.set(id, json.dumps(row))
+                print 'incrementing anno count for %s' %  user
+                self.increment_index(self.user_anno_counts, user)
 
     def update_user_annos(self,rows):
+        """Map users to lists of their annotations (as JSON rows)."""
         for row in rows:
             raw = HypothesisRawAnnotation(row)
             user = raw.user
@@ -722,6 +735,7 @@ class HypothesisStream:
                 self.user_annos.set(user, json.dumps(annos))
 
     def create_timeline(self,counts, days):
+        """Chart a timeline of user contributions."""
         dataset = pd.DataFrame( { 'Day': pd.Series(days),
                                  'Counts': pd.Series(counts) } )
         sns.set_style("whitegrid")
@@ -742,13 +756,15 @@ class HypothesisStream:
         s = '<div style="width:100%;height:60px">' + s + '</div>'
         return s
 
-    def format_tag_tuple(self, breaks, tag_tuple):
+    def format_tag_cloud(self, breaks, tag_tuple):
+        """Map a user's tag cloud data to font sizes."""
         for i in range(len(breaks)):
             if tag_tuple[1] > breaks[i]:
                 continue
             return '<span class="tag-cloud-%d tag-item tag-cloud-item">%s</span>' % ( i, tag_tuple[0] )
 
     def make_tag_cloud(self, user):
+        """Create tag cloud data for a user."""
         annos = json.loads(self.user_annos.get(user))
         taglists = []
         for a in annos:
@@ -765,10 +781,11 @@ class HypothesisStream:
         bin_count = 3
         histogram = numpy.histogram(tag_counts, bins=bin_count)
         breaks = histogram[1]
-        formatted_tag_tuples = [self.format_tag_tuple(breaks, tag_tuple) for tag_tuple in tag_tuples]
+        formatted_tag_tuples = [self.format_tag_cloud(breaks, tag_tuple) for tag_tuple in tag_tuples]
         return ' '.join(formatted_tag_tuples)
                
     def make_timeline_data(self,user):
+        """Create timeline data for a user."""
         annos = json.loads(self.user_annos.get(user))
         dates = [a['updated'] for a in annos]
         dates = [parser.parse(date) for date in dates]
@@ -866,7 +883,6 @@ class HypothesisHtmlAnnotation:
         self.text_html = h_stream.make_text_html(raw)
         self.tag_html = h_stream.make_tag_html(raw)
         self.raw=raw
-
 
 class anno_dict:
     def __init__(self):
