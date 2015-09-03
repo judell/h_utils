@@ -77,6 +77,39 @@ class HypothesisUtils:
             for row in rows:
                 yield row
 
+    def make_annotation_payload_with_target_using_only_text_quote(self, url, prefix, exact, suffix, text, tags, link):
+        """Create JSON payload for API call."""
+        payload = {
+            "uri": url,
+            "user": 'acct:' + self.username + '@hypothes.is',
+            "permissions": {
+                "read": ["group:__world__"],
+                "update": ['acct:' + self.username + '@hypothes.is'],
+                "delete": ['acct:' + self.username + '@hypothes.is'],
+                "admin":  ['acct:' + self.username + '@hypothes.is']
+                },
+            "document": {
+                "link":  link   # link is a list of dict
+                },
+            "target": 
+            [
+                {
+                "selector": 
+                    [
+                        {
+                        "type": "TextQuoteSelector", 
+                        "prefix": prefix,
+                        "exact": exact,
+                        "suffix": suffix
+                        },
+                    ]
+                }
+            ], 
+            "tags": tags,
+            "text": text
+        }
+        return payload
+
     def make_annotation_payload_with_target(self, url, start_pos, end_pos, prefix, exact, suffix, text, tags, link):
         """Create JSON payload for API call."""
         payload = {
@@ -139,6 +172,15 @@ class HypothesisUtils:
         """Call API with token and payload, create annotation"""
         headers = {'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json;charset=utf-8' }
         payload = self.make_annotation_payload_with_target(url, start_pos, end_pos, prefix, exact, suffix, text, tags, link)
+        data = json.dumps(payload, ensure_ascii=False)
+        r = requests.post(self.api_url + '/annotations', headers=headers, data=data)
+        return r
+
+    def create_annotation_with_target_using_only_text_quote(self, url=None, prefix=None, 
+               exact=None, suffix=None, text=None, tags=None, link=None):
+        """Call API with token and payload, create annotation (using only text quote)"""
+        headers = {'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json;charset=utf-8' }
+        payload = self.make_annotation_payload_with_target_using_only_text_quote(url, prefix, exact, suffix, text, tags, link)
         data = json.dumps(payload, ensure_ascii=False)
         r = requests.post(self.api_url + '/annotations', headers=headers, data=data)
         return r
@@ -222,6 +264,7 @@ class HypothesisStream:
         self.displayed_in_thread = defaultdict(bool)
         self.debug = False
         self.log = ''
+        self.excluded_users = ['arXiv']
 
     def add_row(self, row):
         """Add one API result to this instance."""
@@ -328,6 +371,7 @@ class HypothesisStream:
     def alt_stream(request):
         """Entry point called from views.py (in H dev env) or h.py in this project."""
         q = urlparse.parse_qs(request.query_string)
+        #q = { 'user':['judell'], 'by_url':'no', 'tags':['h_repo'] }
         h_stream = HypothesisStream()
         h_stream.anno_dict = redis.StrictRedis(host=h_stream.redis_host,port=6379, db=0) 
         if q.has_key('tags'):
@@ -358,7 +402,7 @@ class HypothesisStream:
                 timeline = h_stream.create_timeline(timeline_counts, timeline_days)
                 anno_counts = h_stream.user_anno_counts.get(user)
                 user_replies = h_stream.user_replies.get(user) 
-                head += '<h1 class="user-contributions">Since %s %s has contributed %s annotations, of which %s were replies</h1>' % (first_day, user, anno_counts, user_replies)
+                head += '<h1 class="user-contributions">Since %s %s has contributed %s annotations</h1>' % (first_day, user, anno_counts)
                 if len(timeline_days) > 15:
                     head += timeline
                 head += '<div class="user-tag-cloud">%s</div>' % h_stream.make_tag_cloud(user)
@@ -389,7 +433,8 @@ class HypothesisStream:
         via_url = HypothesisUtils().via_url
         s = '<div class="stream-url">'
         photo_url = self.user_icons.get(html_annotation.raw.user)
-        photo_url = 'http://jonudell.net/h/generic-user.jpg' if photo_url == None else photo_url
+        photo_url = 'http://jonudell.net/h/generic-user.jpg' 
+        # if photo_url == None else photo_url
         s += '<img class="user-image-small" src="%s"/>' % photo_url
         if uri.startswith('http'):
             s += """<a target="_new" class="ng-binding" href="%s">%s</a> 
@@ -471,7 +516,7 @@ class HypothesisStream:
             self.selected_tags = tags
             params['tags'] = tags
 
-        for row in HypothesisUtils().search_all(params):
+        for row in HypothesisUtils(max_results=600).search_all(params):
            self.add_row(row)
         self.sort()
 
@@ -479,10 +524,9 @@ class HypothesisStream:
         for uri in self.uris_by_recent_update:
             html_annotations = self.uri_html_annotations[uri]
 
-
             s += self.display_url(html_annotations[0], uri)  
 
-            for i in range(len(html_annotations[1:])):
+            for i in range(len(html_annotations)):
 
                 html_annotation = html_annotations[i]
 
@@ -597,11 +641,11 @@ class HypothesisStream:
     .stream-selector {{ float:right; }}
     .stream-picklist {{ font-size:smaller; float:right }}
     ul, li {{ display: inline }}
-    li {{ color: #969696; font-size: smaller; border: 1px solid #d3d3d3; border-radius: 2px;}}
+    /* li {{ color: #969696; font-size: smaller; border: 1px solid #d3d3d3; border-radius: 2px;}} */
     img {{ max-width: 100% }}
     annotation-timestamp {{ margin-right: 20px }}
     img {{ padding:10px }}
-    .tag-item {{ text-decoration: none; border: 1px solid #BBB3B3; border-radius: 2px; padding: 3px; color: #969696; background: #f9f9f9; }}
+    .tag-item {{ font-size: smaller; text-decoration: none; border: 1px solid #BBB3B3; border-radius: 2px; padding: 3px; color: #969696; background: #f9f9f9; }}
     a.selected-tag-item {{ rgb(215, 216, 212); padding:3px; color:black; border: 1px solid black;}}
     .user-contributions: {{ clear:left }}
     .user-image-small {{ height: 20px; vertical-align:middle; margin-right:4px; padding:0 }}
@@ -630,7 +674,9 @@ class HypothesisStream:
                 rows = HypothesisUtils().search_all()
                 rows = list(rows)
                 self.update_uri_users_dict(rows)
-                self.update_anno_and_ref_and_photo_dicts(rows)
+                self.update_anno_dicts(rows)
+                self.update_photo_dicts(rows)
+                self.update_ref_dicts(rows)
                 self.update_user_annos(rows)
                 time.sleep(15)
             except:
@@ -666,6 +712,8 @@ class HypothesisStream:
         """Map users to lists of URLs they have annotated."""
         for row in rows:
             raw = HypothesisRawAnnotation(row) 
+            if raw.user in self.excluded_users:
+                continue
             if self.uri_users.get(raw.uri) is None:
                 self.uri_users.set(raw.uri, json.dumps([]))
             users = json.loads(self.uri_users.get(raw.uri))
@@ -677,15 +725,18 @@ class HypothesisStream:
         """Map user names (for prototype only) to Twitter photos."""
         for row in rows:
             raw = HypothesisRawAnnotation(row) 
-            id = raw.id
-            if self.user_icons.get(user) is None:
-                print 'adding photo for %s' %  user
-                self.user_icons.set(user, self.get_user_twitter_photo(user))
+            if raw.user in self.excluded_users:
+                continue
+            if self.user_icons.get(raw.user) is None:
+                print 'adding photo for %s' %  raw.user
+                self.user_icons.set(raw.user, self.get_user_twitter_photo(raw.user))
 
     def update_ref_dicts(self,rows):
         """Update ref_children and ref_parents."""
         for row in rows:
             raw = HypothesisRawAnnotation(row) 
+            if raw.user in self.excluded_users:
+                continue
             id = raw.id
             user = raw.user
             if len(raw.references):
@@ -709,6 +760,8 @@ class HypothesisStream:
         """Map ids to annotations (JSON rows) in anno_dict, map per-user counts in user_anno_counts."""
         for row in rows:
             raw = HypothesisRawAnnotation(row) 
+            if raw.user in self.excluded_users:
+                continue
             id = raw.id
             user = raw.user
             refs = raw.references
@@ -722,6 +775,8 @@ class HypothesisStream:
         """Map users to lists of their annotations (as JSON rows)."""
         for row in rows:
             raw = HypothesisRawAnnotation(row)
+            if raw.user in self.excluded_users:
+                continue
             user = raw.user
             annos_json = self.user_annos.get(user)
             if annos_json is None:
@@ -867,7 +922,7 @@ class HypothesisRawAnnotation:
             self.target = row['target']
 
         self.is_page_note = False
-        if self.references == [] and self.target == [] and self.tags == []: 
+        if self.references == [] and self.target == []: 
             self.is_page_note = True
         if row.has_key('document') and row['document'].has_key('link'):
             self.links = row['document']['link']
@@ -876,6 +931,27 @@ class HypothesisRawAnnotation:
         else:
             self.links = []
 
+        self.start = self.end = self.prefix = self.exact = self.suffix = None
+
+        try:
+            if self.target is not None and len(self.target) and self.target[0].has_key('selector'):
+                selectors = self.target[0]['selector']
+                for selector in selectors:
+                    if selector.has_key('type') and selector['type'] == 'TextQuoteSelector':
+                        try:
+                            self.prefix = selector['prefix']
+                            self.exact = selector['exact']
+                            self.suffix = selector['suffix']
+                        except:
+                            pass
+                    if selector.has_key('type') and selector['type'] == 'TextPositionSelector' and selector.has_key('start'):
+                        self.start = selector['start']
+                        self.end = selector['end']
+                    else:
+                        self.start = -1
+                        self.end = -1
+        except:
+            print traceback.format_exc()
 
 class HypothesisHtmlAnnotation:
     def __init__(self, h_stream, raw):
