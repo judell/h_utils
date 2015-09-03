@@ -33,6 +33,12 @@ class HypothesisUtils:
         self.password = password
         self.single_page_limit = 200 if limit is None else limit  # per-page, the api honors limit= up to (currently) 200
         self.multi_page_limit = 200 if max_results is None else max_results  # limit for paginated results
+        self.permissions = {
+                "read": ["group:__world__"],
+                "update": ['acct:' + self.username + '@hypothes.is'],
+                "delete": ['acct:' + self.username + '@hypothes.is'],
+                "admin":  ['acct:' + self.username + '@hypothes.is']
+                }
 
     def login(self):
         """Request an assertion, exchange it for an auth token."""
@@ -82,12 +88,7 @@ class HypothesisUtils:
         payload = {
             "uri": url,
             "user": 'acct:' + self.username + '@hypothes.is',
-            "permissions": {
-                "read": ["group:__world__"],
-                "update": ['acct:' + self.username + '@hypothes.is'],
-                "delete": ['acct:' + self.username + '@hypothes.is'],
-                "admin":  ['acct:' + self.username + '@hypothes.is']
-                },
+            "permissions": self.permissions,
             "document": {
                 "link":  link   # link is a list of dict
                 },
@@ -115,12 +116,7 @@ class HypothesisUtils:
         payload = {
             "uri": url,
             "user": 'acct:' + self.username + '@hypothes.is',
-            "permissions": {
-                "read": ["group:__world__"],
-                "update": ['acct:' + self.username + '@hypothes.is'],
-                "delete": ['acct:' + self.username + '@hypothes.is'],
-                "admin":  ['acct:' + self.username + '@hypothes.is']
-                },
+            "permissions": self.permissions,
             "document": {
                 "link":  link   # link is a list of dict
                 },
@@ -153,12 +149,7 @@ class HypothesisUtils:
         payload = {
             "uri": url,
             "user": 'acct:' + self.username + '@hypothes.is',
-            "permissions": {
-                "read": ["group:__world__"],
-                "update": ['acct:' + self.username + '@hypothes.is'],
-                "delete": ['acct:' + self.username + '@hypothes.is'],
-                "admin":  ['acct:' + self.username + '@hypothes.is']
-                },
+            "permissions": self.permissions,
             "document": {
                 "link":  link   # link is a list of dict
                 },
@@ -167,30 +158,30 @@ class HypothesisUtils:
         }
         return payload
 
+    def post_annotation(self, payload):
+        headers = {'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json;charset=utf-8' }
+        data = json.dumps(payload, ensure_ascii=False)
+        r = requests.post(self.api_url + '/annotations', headers=headers, data=data)
+        return r
+
     def create_annotation_with_target(self, url=None, start_pos=None, end_pos=None, prefix=None, 
                exact=None, suffix=None, text=None, tags=None, link=None):
         """Call API with token and payload, create annotation"""
-        headers = {'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json;charset=utf-8' }
         payload = self.make_annotation_payload_with_target(url, start_pos, end_pos, prefix, exact, suffix, text, tags, link)
-        data = json.dumps(payload, ensure_ascii=False)
-        r = requests.post(self.api_url + '/annotations', headers=headers, data=data)
+        r = self.post_annotation(payload)
         return r
 
     def create_annotation_with_target_using_only_text_quote(self, url=None, prefix=None, 
                exact=None, suffix=None, text=None, tags=None, link=None):
         """Call API with token and payload, create annotation (using only text quote)"""
-        headers = {'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json;charset=utf-8' }
         payload = self.make_annotation_payload_with_target_using_only_text_quote(url, prefix, exact, suffix, text, tags, link)
-        data = json.dumps(payload, ensure_ascii=False)
-        r = requests.post(self.api_url + '/annotations', headers=headers, data=data)
+        r = self.post_annotation(payload)
         return r
 
     def create_annotation_without_target(self, url=None, text=None, tags=None, link=None):
         """Call API with token and payload, create page note (annotation with no target)"""
-        headers = {'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json;charset=utf-8' }
         payload = self.make_annotation_payload_without_target(url, text, tags, link)
-        data = json.dumps(payload, ensure_ascii=False)
-        r = requests.post(self.api_url + '/annotations', headers=headers, data=data)
+        r = self.post_annotation(payload)
         return r
 
     def get_active_users(self):
