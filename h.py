@@ -11,11 +11,76 @@ from datetime import datetime
 from feedgen.feed import FeedGenerator
 import urlparse, operator
 
-host = 'localhost'
-#host = 'h.jonudell.info'
+#host = 'localhost'
+host = 'h.jonudell.info'
 port = 8080
 host_port = 'http://' + host + ':' + str(port)
-alt_stream = 'https://alt-stream.dokku.hypothes.is'
+alt_stream = 'http://h.jonudell.info:5000'
+
+def count(request):
+    url = urlparse.parse_qs(request.query_string)['url'][0]
+    api_call = "https://hypothes.is/api/search?uri=" + url
+    r = requests.get(api_call);
+    text = r.text.decode('utf-8')
+    obj = json.loads(text)
+    html = str(obj['total'])
+    r = Response(html.encode('utf-8'))
+    r.content_type = 'text/html'
+    return r
+
+def gsearch(request):
+    text = urlparse.parse_qs(request.query_string)['text'][0]
+    print request.query_string
+    print 'text: ' + text
+    html = '<https://groups.google.com/a/list.hypothes.is/forum/#!search/%s>' % text
+    print html
+    r = Response(html.encode('utf-8'))
+    r.content_type = 'text/html'
+    return r
+
+def annos_for_url(request):
+    url = urlparse.parse_qs(request.query_string)['url'][0]
+    api_call = "https://hypothes.is/api/search?limit=200&uri=" + url
+    r = requests.get(api_call);
+    text = r.text.decode('utf-8')
+    obj = json.loads(text)
+    rows = obj['rows']
+    html = """
+<html>
+<head><style>
+body { font-family: verdana; margin: .5in; }
+</style></head>
+<body>
+<h1>Hypothesis annotations for %s</h1>
+%s
+</body>
+</html>
+ """
+    annos = {}
+    for row in rows:
+        raw = HypothesisRawAnnotation(row)
+        annos[raw.id] = { 'user':raw.user, 'start':raw.start, 'end':raw.end, 'prefix':raw.prefix, 'exact':raw.exact, 'suffix':raw.suffix, 'text':raw.text, 'tags':raw.tags }
+    ids = {}
+    for id in annos.keys():
+        ids[id] = annos[id]['start']
+
+    sorted_ids = sorted(ids.items(), key = operator.itemgetter(1,0))
+    _html = ''
+    for sorted_id in sorted_ids:
+      id = sorted_id[0]
+      start = sorted_id[1]
+      if start is None:
+          continue
+      anno = annos[id]
+      tags = anno['tags']
+      tags_html = ''
+      if len(tags):
+          tags_html = '<div><b>Tags:</b> ' + ', '.join(tags) + '</div>'
+      _html += '<p><div><b>User:</b> %s</div><div><b>Start/End</b>: %s/%s</div><div><b>Quote</b>: <span style="color:gray">%s</span> %s <span style="color:gray">%s</span></div><div><b>Text</b>: %s</div> %s </p>' %  ( anno['user'], anno['start'], anno['end'], anno['prefix'], anno['exact'], anno['suffix'], anno['text'], tags_html )
+    html = html % (url, _html)
+    r = Response(html.encode('utf-8'))
+    r.content_type = 'text/html'
+    return r
 
 def feed(request):
     """Temporary until official H Atom feed."""
@@ -61,18 +126,18 @@ def activity(request):
 def make_activity(j):
     """Activity report."""
     users = defaultdict(int)
-    days = defaultdict(int)
+    hours = defaultdict(int)
     rows = j['rows']
     for row in rows:
         raw = HypothesisRawAnnotation(row)
         created = raw.updated
-        day = created[0:10]
-        days[day] += 1
+        hour = created[0:13]
+        hours[hour] += 1
         user = raw.user
         users[user] += 1
         uri = raw.uri
 
-    days = sorted(days.items(), key=operator.itemgetter(0,1), reverse=True)
+    hours = sorted(hours.items(), key=operator.itemgetter(0,1), reverse=True)
 
     users = sorted(users.items(), key=operator.itemgetter(1,0), reverse=True)
 
@@ -87,9 +152,9 @@ body { font-family: verdana; margin: .2in; }
 </body>
 </html>
  """
-    s = '<p>days: %s </p>' % len(days)
-    for day in days:
-        s += '<div>%s: %s</div>' % (day[0], day[1])
+    s = '<p>hours: %s </p>' % len(hours)
+    for hour in hours:
+        s += '<div>%s: %s</div>' % (hour[0], hour[1])
 
     s += '<p>users: %s</p>' % len(users)
     for user in users:
@@ -114,19 +179,18 @@ def make_feed(j, facet, value):
         user = raw.user
         uri = raw.uri
         doc_title = raw.doc_title
-        title = 'note by %s on "%s" (%s)' % ( user, doc_title, uri )
         fe = fg.add_entry()
-        fe.title(title)
-        fe.link(href="https://hypothes.is/a/%s" % r['id'])
+        fe.title(doc_title + ' ' + r['uri'])
+        fe.link(href="https://via.hypothes.is/%s" % r['uri'])
         fe.id("https://hypothes.is/a/%s" % r['id'])
         fe.author({'name': r['user']})
-        content = ''
+        content = '<p>note by %s on "%s" (%s)</p>' % ( user, doc_title, uri )
         if r.has_key('text'):
-            content += ': ' + r['text']
+            content += '<p>%s</p>' % r['text']
         if r.has_key('tags'):
-            content += ' [tags: %s]' % ','.join(r['tags'])
+            content += '<p>[tags: %s]</p>' % ','.join(r['tags'])
         fe.content(content)
-    str = fg.atom_str(pretty=True)
+    str = fg.rss_str(pretty=True)
     return str
 
 if __name__ == '__main__':
@@ -136,6 +200,9 @@ if __name__ == '__main__':
     from pyramid.response import Response
 
     config = Configurator()
+
+    config.add_route('annos_for_url', '/annos_for_url')
+    config.add_view(annos_for_url, route_name='annos_for_url')
 
     config.add_route('feed', '/feed')
     config.add_view(feed, route_name='feed')
@@ -151,6 +218,12 @@ if __name__ == '__main__':
 
     config.add_route('alt_stream_js', '/stream.alt.js')
     config.add_view(HypothesisStream.alt_stream_js, route_name='alt_stream_js')
+
+    config.add_route('gsearch', '/gsearch')
+    config.add_view(gsearch, route_name='gsearch')
+
+    config.add_route('count', '/count')
+    config.add_view(count, route_name='count')
 
     app = config.make_wsgi_app()
     server = make_server(host, port, app)
