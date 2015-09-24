@@ -23,12 +23,17 @@ except ImportError:
 
 
 class HypothesisUtils:
-    def __init__(self, username=None, password=None, limit=None, max_results=None):
-        self.app_url = 'https://hypothes.is/app'
-        self.api_url = 'https://hypothes.is/api'
-        self.query_url = 'https://hypothes.is/api/search?{query}'
-        self.anno_url = 'https://hypothes.is/a'
+    def __init__(self, username='username', password=None, limit=None, max_results=None, domain=None):
+        if domain is None:
+            self.domain = 'hypothes.is'
+        else:
+            self.domain = domain
+        self.app_url = 'https://%s/app' % self.domain
+        self.api_url = 'https://%s/api' % self.domain
+        self.query_url = 'https://%s/api/search?{query}' % self.domain
+        self.anno_url = 'https://%s/a' % domain
         self.via_url = 'https://via.hypothes.is'
+
         self.username = username
         self.password = password
         self.single_page_limit = 200 if limit is None else limit  # per-page, the api honors limit= up to (currently) 200
@@ -64,6 +69,7 @@ class HypothesisUtils:
         """Call search API with no pagination, return JSON."""
         params['limit'] = self.single_page_limit
         h_url = self.query_url.format(query=urlencode(params))
+        print h_url
         json = requests.get(h_url).json()
         return json
  
@@ -73,6 +79,7 @@ class HypothesisUtils:
         params['offset'] = 0
         while True:
             h_url = self.query_url.format(query=urlencode(params, True))
+            print h_url
             r = requests.get(h_url).json()
             rows = r.get('rows')
             params['offset'] += len(rows)
@@ -83,15 +90,15 @@ class HypothesisUtils:
             for row in rows:
                 yield row
 
-    def make_annotation_payload_with_target_using_only_text_quote(self, url, prefix, exact, suffix, text, tags, link):
+    def make_annotation_payload_with_target_using_only_text_quote(self, url, prefix, exact, suffix, text, tags):
         """Create JSON payload for API call."""
         payload = {
             "uri": url,
             "user": 'acct:' + self.username + '@hypothes.is',
             "permissions": self.permissions,
-            "document": {
-                "link":  link   # link is a list of dict
-                },
+            #"document": {
+            #    "link":  [ { "href": url } ]
+            #    },
             "target": 
             [
                 {
@@ -111,11 +118,35 @@ class HypothesisUtils:
         }
         return payload
 
-    def make_annotation_payload_with_target(self, url, start_pos, end_pos, prefix, exact, suffix, text, tags, link):
+    def make_annotation_payload_with_target_using_only_fragment(self, url, fragment, text, tags):
         """Create JSON payload for API call."""
         payload = {
             "uri": url,
             "user": 'acct:' + self.username + '@hypothes.is',
+            "permissions": self.permissions,
+            "target": 
+            [
+                {
+                "selector": 
+                    [
+                        {
+                            "conformsTo": "https://tools.ietf.org/html/rfc3236",
+                            "type": "FragmentSelector",
+                            "value": fragment
+                        },
+                    ]
+                }
+            ], 
+            "tags": tags,
+            "text": text
+        }
+        return payload
+
+    def make_annotation_payload_with_target(self, url, start_pos, end_pos, prefix, exact, suffix, text, tags, link):
+        """Create JSON payload for API call."""
+        payload = {
+            "uri": url,
+            "user": 'acct:' + self.username + '@' + self.domain,
             "permissions": self.permissions,
             "document": {
                 "link":  link   # link is a list of dict
@@ -158,6 +189,11 @@ class HypothesisUtils:
         }
         return payload
 
+    def delete_annotation(self, id):
+       headers = {'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json;charset=utf-8' }
+       r = requests.delete(self.api_url + '/annotations/' + id, headers=headers)
+       return r
+
     def post_annotation(self, payload):
         headers = {'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json;charset=utf-8' }
         data = json.dumps(payload, ensure_ascii=False)
@@ -172,9 +208,15 @@ class HypothesisUtils:
         return r
 
     def create_annotation_with_target_using_only_text_quote(self, url=None, prefix=None, 
-               exact=None, suffix=None, text=None, tags=None, link=None):
+               exact=None, suffix=None, text=None, tags=None):
         """Call API with token and payload, create annotation (using only text quote)"""
-        payload = self.make_annotation_payload_with_target_using_only_text_quote(url, prefix, exact, suffix, text, tags, link)
+        payload = self.make_annotation_payload_with_target_using_only_text_quote(url, prefix, exact, suffix, text, tags)
+        r = self.post_annotation(payload)
+        return r
+
+    def create_annotation_with_target_using_only_fragment(self, url=None, fragment=None, text=None, tags=None):
+        """Call API with token and payload, create annotation (using only fragment selector)"""
+        payload = self.make_annotation_payload_with_target_using_only_fragment(url, fragment, text, tags)
         r = self.post_annotation(payload)
         return r
 
@@ -256,12 +298,20 @@ class HypothesisStream:
         self.debug = False
         self.log = ''
         self.excluded_users = ['arXiv']
+        self.excluded_ids = ['2QbfGrgBSM-m9_QNaQfrVw', 'P62wqPSWSROkrdM98-dLKg', 'myZ_Lb7EQDyt_vW7_D3Wrw']
 
     def add_row(self, row):
         """Add one API result to this instance."""
         raw = HypothesisRawAnnotation(row)
 
-        uri = raw.uri
+        if raw.id in self.excluded_ids:
+            return
+
+        #uri = raw.uri
+        try:
+            uri = row['document']['link'][0]['href']
+        except:
+            uri = raw.uri
         updated = raw.updated
         if self.uri_updates.has_key(uri) == True:  # track most-recent update per uri
             if updated > self.uri_updates[uri]:
@@ -319,7 +369,10 @@ class HypothesisStream:
         text = raw.text
         if raw.is_page_note:
             text = '<span title="Page Note" class="h-icon-insert-comment"></span> ' + text
-        text = markdown(text)
+        try:
+            text = markdown(text)
+        except:
+            traceback.print_exc()
         return text
 
 
@@ -412,7 +465,7 @@ class HypothesisStream:
         when = HypothesisUtils.friendly_time(dt)
         return when
 
-    def display_url(self, html_annotation, uri):
+    def display_url(self, html_annotation, uri, count, dom_id):
         """Display a recently-annotated URL."""
         uri = uri.replace('https://via.hypothes.is/static/__shared/viewer/web/viewer.html?file=/id_/','')
         id = html_annotation.raw.id
@@ -427,11 +480,8 @@ class HypothesisStream:
         photo_url = 'http://jonudell.net/h/generic-user.jpg' 
         # if photo_url == None else photo_url
         s += '<img class="user-image-small" src="%s"/>' % photo_url
-        if uri.startswith('http'):
-            s += """<a target="_new" class="ng-binding" href="%s">%s</a> 
-(<a title="use Hypothesis proxy" target="_new" href="%s/%s">via</a>)"""  % (uri, doc_title, via_url, uri)
-        else:
-            s += doc_title
+        s += """<a title="toggle %s annotations" href="javascript:toggle_dom_id('%s')">[%d]</a> <a target="_new" class="ng-binding" href="%s">%s</a> 
+(<a title="use Hypothesis proxy" target="_new" href="%s/%s">via</a>)"""  % (count, dom_id, count, uri, doc_title, via_url, uri)
         s += """<span class="small pull-right">%s</span>
 </div>""" % when
         try:
@@ -507,19 +557,26 @@ class HypothesisStream:
             self.selected_tags = tags
             params['tags'] = tags
 
-        for row in HypothesisUtils(max_results=600).search_all(params):
+        for row in HypothesisUtils(max_results=400).search_all(params):
            self.add_row(row)
         self.sort()
 
         s = ''
+        dom_id = 0
+
         for uri in self.uris_by_recent_update:
+
+            dom_id += 1
+
             html_annotations = self.uri_html_annotations[uri]
+            count = len(html_annotations)        
+            s += self.display_url(html_annotations[0], uri, count, str(dom_id))  
 
-            s += self.display_url(html_annotations[0], uri)  
+            s += '<div class="hidden" id="%s">' % dom_id
 
-            for i in range(len(html_annotations)):
+            for j in range(count):
 
-                html_annotation = html_annotations[i]
+                html_annotation = html_annotations[j]
 
                 id = html_annotation.raw.id
 
@@ -533,6 +590,8 @@ class HypothesisStream:
                     s += '<div class="paper">'
                     s += self.make_singleton_or_thread_html(id)
                     s += '</div>'
+
+            s += '</div>'
 
         return s
 
@@ -601,7 +660,16 @@ class HypothesisStream:
        var i = select.selectedIndex;
        var user = select[i].value;
        location.href= '/stream.alt?by_url=no&user=' + user;
-    } """
+    } 
+     function toggle_dom_id(id) {
+      element = document.getElementById(id);
+      klass = element.getAttribute('class');
+      if ( klass == 'visible' )
+        element.setAttribute('class', 'hidden')
+      else
+        element.setAttribute('class', 'visible')
+      }
+    """
         r = Response(js)
         r.content_type = b'text/javascript'
         return r
@@ -616,7 +684,7 @@ class HypothesisStream:
     <style>
     body {{ padding: 10px; font-size: 10pt; position:relative; margin-top: 2%; width:80%; margin-left: auto; margin-right:auto}}
     h1 {{ font-weight: bold; margin-bottom:10pt }}
-    .stream-url {{ margin-top:3pt; word-wrap:break-word;  overflow:hidden; border-style: solid; border-color: rgb(179, 173, 173); border-width: thin; padding: 4px;}}
+    .stream-url {{ margin-top:15px; word-wrap:break-word;  overflow:hidden; border-style: solid; border-color: rgb(179, 173, 173); border-width: thin; padding: 4px;}}
     .stream-reference {{ margin-bottom:4pt; /*margin-left:6%*/ }}
     .stream-annotation {{ /*margin-left: 3%; margin-bottom: 4pt; */}}
     .stream-text {{ margin-bottom: 2pt; /*margin-left:7%;*/ word-wrap: break-word }}
@@ -648,6 +716,8 @@ class HypothesisStream:
     .tag-cloud-1 {{ font-size:normal }}
     .tag-cloud-2 {{ font-size:large }}
     .tag-cloud-3 {{ font-size:x-large }}
+    .hidden {{ display:none }}
+    .visible {{ display:block }}
     </style>
 </head>
 <body class="ng-scope">
@@ -938,6 +1008,8 @@ class HypothesisRawAnnotation:
                     if selector.has_key('type') and selector['type'] == 'TextPositionSelector' and selector.has_key('start'):
                         self.start = selector['start']
                         self.end = selector['end']
+                    if selector.has_key('type') and selector['type'] == 'FragmentSelector':
+                        self.fragment_selector = selector['value']
                     else:
                         self.start = -1
                         self.end = -1
