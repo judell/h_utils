@@ -69,7 +69,7 @@ class HypothesisUtils:
         """Call search API with no pagination, return JSON."""
         params['limit'] = self.single_page_limit
         h_url = self.query_url.format(query=urlencode(params))
-        print h_url
+        #print h_url
         json = requests.get(h_url).json()
         return json
  
@@ -79,7 +79,7 @@ class HypothesisUtils:
         params['offset'] = 0
         while True:
             h_url = self.query_url.format(query=urlencode(params, True))
-            print h_url
+            #print h_url
             r = requests.get(h_url).json()
             rows = r.get('rows')
             params['offset'] += len(rows)
@@ -102,6 +102,7 @@ class HypothesisUtils:
             "target": 
             [
                 {
+                "scope": [ url ],
                 "selector": 
                     [
                         {
@@ -127,6 +128,7 @@ class HypothesisUtils:
             "target": 
             [
                 {
+                "scope": [ url ],
                 "selector": 
                     [
                         {
@@ -154,6 +156,7 @@ class HypothesisUtils:
             "target": 
             [
                 {
+                "scope": [ url ],
                 "selector": 
                     [
                         {
@@ -170,20 +173,6 @@ class HypothesisUtils:
                     ]
                 }
             ], 
-            "tags": tags,
-            "text": text
-        }
-        return payload
-
-    def make_annotation_payload_without_target(self, url, text, tags, link):
-        """Create JSON payload for API call."""
-        payload = {
-            "uri": url,
-            "user": 'acct:' + self.username + '@hypothes.is',
-            "permissions": self.permissions,
-            "document": {
-                "link":  link   # link is a list of dict
-                },
             "tags": tags,
             "text": text
         }
@@ -220,9 +209,8 @@ class HypothesisUtils:
         r = self.post_annotation(payload)
         return r
 
-    def create_annotation_without_target(self, url=None, text=None, tags=None, link=None):
-        """Call API with token and payload, create page note (annotation with no target)"""
-        payload = self.make_annotation_payload_without_target(url, text, tags, link)
+    def create_annotation_with_custom_payload(self, payload=None):
+        payload = json.loads(payload)
         r = self.post_annotation(payload)
         return r
 
@@ -477,7 +465,7 @@ class HypothesisStream:
         via_url = HypothesisUtils().via_url
         s = '<div class="stream-url">'
         photo_url = self.user_icons.get(html_annotation.raw.user)
-        photo_url = 'http://jonudell.net/h/generic-user.jpg' 
+        #photo_url = 'http://jonudell.net/h/generic-user.jpg' 
         # if photo_url == None else photo_url
         s += '<img class="user-image-small" src="%s"/>' % photo_url
         s += """<a title="toggle %s annotations" href="javascript:toggle_dom_id('%s')">[%d]</a> <a target="_new" class="ng-binding" href="%s">%s</a> 
@@ -736,7 +724,7 @@ class HypothesisStream:
                 rows = list(rows)
                 self.update_uri_users_dict(rows)
                 self.update_anno_dicts(rows)
-                self.update_photo_dicts(rows)
+                #self.update_photo_dicts(rows)
                 self.update_ref_dicts(rows)
                 self.update_user_annos(rows)
                 time.sleep(15)
@@ -939,9 +927,19 @@ class HypothesisRawAnnotation:
         self.id = row['id']
         self.updated = row['updated'][0:19]
         self.user = row['user'].replace('acct:','').replace('@hypothes.is','')
-        self.uri = row['uri'].replace('https://via.hypothes.is/h/','').replace('https://via.hypothes.is/','')
 
-        if row['uri'].startswith('urn:x-pdf') and row.has_key('document'):
+        if row.has_key('uri'):    # should it ever not?
+            self.uri = row['uri']
+        else:
+#            try:
+#                print row['target']
+#                self.uri = row['target']['scope'][0]
+#            except:
+#                traceback.print_exc()
+             self.uri = "no uri field for %s" % self.id
+        self.uri = self.uri.replace('https://via.hypothes.is/h/','').replace('https://via.hypothes.is/','')
+
+        if self.uri.startswith('urn:x-pdf') and row.has_key('document'):
             if row['document'].has_key('link'):
                 self.links = row['document']['link']
                 for link in self.links:
