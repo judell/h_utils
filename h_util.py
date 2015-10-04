@@ -269,7 +269,7 @@ class HypothesisStream:
         self.uri_updates = {}
         self.uris_by_recent_update = []
         self.limit = 200 if limit is None else limit
-        self.by_url = 'no'
+        self.by_user = 'no'
         self.selected_tags = None
         self.selected_user = None
         self.redis_host = 'h.jonudell.info'
@@ -321,7 +321,6 @@ class HypothesisStream:
         url = '/stream.alt?user='
         if self.selected_user is not None:
             url += self.selected_user
-        url += '&by_url=' + self.by_url
         url += '&limit='
         if self.limit is not None:
             url += str(self.limit)
@@ -403,7 +402,6 @@ class HypothesisStream:
     def alt_stream(request):
         """Entry point called from views.py (in H dev env) or h.py in this project."""
         q = urlparse.parse_qs(request.query_string)
-        #q = { 'user':['judell'], 'by_url':'no', 'tags':['h_repo'] }
         h_stream = HypothesisStream()
         h_stream.anno_dict = redis.StrictRedis(host=h_stream.redis_host,port=6379, db=0) 
         if q.has_key('tags'):
@@ -412,22 +410,22 @@ class HypothesisStream:
             tags = tuple(tags)
         else:
             tags = None
-        if q.has_key('by_url'):
-            h_stream.by_url=q['by_url'][0]
+        if q.has_key('user'):
+            h_stream.by_user='yes'
         else:
-            h_stream.by_url = 'yes'
+            h_stream.by_user = 'no'
         user, picklist, userlist = h_stream.get_active_user_data(q)  
         if q.has_key('user'):
             user = q['user'][0]
             #if user not in userlist:
             #    picklist = ''
-        if h_stream.by_url=='yes':
+        if h_stream.by_user=='no':
             head = '<h1 class="stream-picklist">recently active user %s</h1>' % (picklist)
             head += '<h1>urls recently annotated</h1>'
             body = h_stream.make_alt_stream(user=None, tags=tags)
         else:
             head = '<h1 class="stream-picklist">recently active users %s</h1>' % (picklist)
-            head += '<h1 class="url-view-toggle"><a href="/stream.alt?by_url=yes">view recent annotations by url</a></h1>'
+            head += '<h1 class="url-view-toggle"><a href="/stream.alt">view recent annotations by all users</a></h1>'
             try:
                 timeline_counts, timeline_days = h_stream.make_timeline_data(user)
                 first_day = timeline_days[0]
@@ -465,8 +463,8 @@ class HypothesisStream:
         via_url = HypothesisUtils().via_url
         s = '<div class="stream-url">'
         photo_url = self.user_icons.get(html_annotation.raw.user)
-        #photo_url = 'http://jonudell.net/h/generic-user.jpg' 
-        # if photo_url == None else photo_url
+        if photo_url == None:
+            photo_url = 'http://jonudell.net/h/generic-user.jpg' 
         s += '<img class="user-image-small" src="%s"/>' % photo_url
         s += """<a title="toggle %s annotations" href="javascript:toggle_dom_id('%s')">[%d]</a> <a target="_new" class="ng-binding" href="%s">%s</a> 
 (<a title="use Hypothesis proxy" target="_new" href="%s/%s">via</a>)"""  % (count, dom_id, count, uri, doc_title, via_url, uri)
@@ -479,7 +477,7 @@ class HypothesisStream:
                 if html_annotation.raw.user in users:
                     users.remove(html_annotation.raw.user)
                 if len(users):
-                    users = ['<a href="/stream.alt?by_url=no&user=%s">%s</a>' % (user, user) for user in users]
+                    users = ['<a href="/stream.alt?user=%s">%s</a>' % (user, user) for user in users]
                     s += '<p class="other-users">also annotated by %s</p>' % ', '.join(users)
         except:
             print traceback.format_exc()
@@ -495,11 +493,7 @@ class HypothesisStream:
                 s += '<div id="%s" class="reply reply-%s">' % ( id, level )
             else:
                 s += '<div id=%s" class="stream-annotation">' % id
-        
-            #if self.by_url == 'yes':
-            #    user = html_annotation.raw.user
-            #    s += '<p class="stream-user"><a href="/stream.alt?user=%s&by_url=no">%s</a></p>' % (user, user)
-            
+               
             quote_html = html_annotation.quote_html
             text_html = html_annotation.text_html
             tag_html = html_annotation.tag_html
@@ -516,7 +510,7 @@ class HypothesisStream:
                 s += '<p class="stream-tags">%s</p>' % tag_html
 
             user = html_annotation.raw.user
-            user_sig = '<a href="/stream.alt?by_url=no&user=%s">%s</a>' % ( user, user )
+            user_sig = '<a href="/stream.alt?user=%s">%s</a>' % ( user, user )
             time_sig = self.show_friendly_time(html_annotation.raw.updated) 
             s += '<p class="user-sig">%s %s</a>' % ( user_sig, time_sig ) 
 
@@ -647,7 +641,7 @@ class HypothesisStream:
        var select = document.getElementsByName('active_users')[0];
        var i = select.selectedIndex;
        var user = select[i].value;
-       location.href= '/stream.alt?by_url=no&user=' + user;
+       location.href= '/stream.alt?user=' + user;
     } 
      function toggle_dom_id(id) {
       element = document.getElementById(id);
