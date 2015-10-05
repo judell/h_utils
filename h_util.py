@@ -420,16 +420,14 @@ class HypothesisStream:
         else:
             h_stream.by_domain = 'no'
         user, picklist, userlist = h_stream.get_active_user_data(q)  
+        head = '<h1 class="stream-picklist">recently active user %s</h1>' % (picklist)
         if h_stream.by_domain=='yes':
-            head = '<h1 class="stream-picklist">recently active user %s</h1>' % (picklist)
             head += '<h1>urls recently annotated in %s</h1>' % domain
             body = h_stream.make_alt_stream(user=None, tags=tags, domain=domain)
         elif h_stream.by_user=='no':
-            head = '<h1 class="stream-picklist">recently active user %s</h1>' % (picklist)
             head += '<h1>urls recently annotated</h1>'
             body = h_stream.make_alt_stream(user=None, tags=tags)
         else:
-            head = '<h1 class="stream-picklist">recently active users %s</h1>' % (picklist)
             head += '<h1 class="url-view-toggle"><a href="/stream.alt">view recent annotations by all users</a></h1>'
             try:
                 timeline_counts, timeline_days = h_stream.make_timeline_data(user)
@@ -458,7 +456,7 @@ class HypothesisStream:
 
     def display_url(self, html_annotation, uri, count, dom_id):
         """Display a recently-annotated URL."""
-        uri = uri.replace('https://via.hypothes.is/static/__shared/viewer/web/viewer.html?file=/id_/','')
+        uri = uri.replace('https://via.hypothes.is/static/__shared/viewer/web/viewer.html?file=/id_/','').replace('https://via.hypothes.is/','')
         id = html_annotation.raw.id
         if self.displayed_in_thread[id]:
             return ''
@@ -467,10 +465,14 @@ class HypothesisStream:
         doc_title = html_annotation.raw.doc_title
         via_url = HypothesisUtils().via_url
         s = '<div class="stream-url">'
-        photo_url = self.user_icons.get(html_annotation.raw.user)
+        user = html_annotation.raw.user
+        photo_url = self.user_icons.get(user)
         if photo_url == None:
             photo_url = 'http://jonudell.net/h/generic-user.jpg' 
-        s += '<img class="user-image-small" src="%s"/>' % photo_url
+        image_html = '<img class="user-image-small" src="%s"/></a>' % photo_url
+        if self.by_user == 'no':
+            image_html = '<a title="%s most recently annotated by %s, click for %s\'s recent annotations" href="/stream.alt?user=%s">%s</a>' % (uri, user, user, user, image_html)
+        s += image_html
         s += """<a title="toggle %s annotations" href="javascript:toggle_dom_id('%s')">[%d]</a> <a target="_new" class="ng-binding" href="%s">%s</a> 
 (<a title="use Hypothesis proxy" target="_new" href="%s/%s">via</a>)"""  % (count, dom_id, count, uri, doc_title, via_url, uri)
         s += """<span class="small pull-right">%s</span>
@@ -481,9 +483,10 @@ class HypothesisStream:
                 users = set(json.loads(users))
                 if html_annotation.raw.user in users:
                     users.remove(html_annotation.raw.user)
+                s += '<div class="stream-uri-raw">%s</div>' % uri
                 if len(users):
                     users = ['<a href="/stream.alt?user=%s">%s</a>' % (user, user) for user in users]
-                    s += '<p class="other-users">also annotated by %s</p>' % ', '.join(users)
+                    s += '<div class="other-users">also annotated by %s</div>' % ', '.join(users)
         except:
             print traceback.format_exc()
         return s
@@ -547,7 +550,7 @@ class HypothesisStream:
         if domain is None:
             max = 400
         else:
-            max = 2000
+            max = 3000
 
         for row in HypothesisUtils(max_results=max).search_all(params):
             try:
@@ -711,6 +714,7 @@ class HypothesisStream:
     .user-contributions: {{ clear:left }}
     .user-image-small {{ height: 20px; vertical-align:middle; margin-right:4px; padding:0 }}
     .other-users {{ font-size:smaller;font-style:italic }}
+    .stream-uri-raw {{ word-wrap: break-word; font-size:smaller;font-style:italic; font-weight:bold }}
     .stream-active-users-widget {{ margin-top: 20px }}
     .paper {{ margin:15px; border-color:rgb(192, 184, 184); border-width:thin;border-style:solid }}
     .tag-cloud-item {{ border: none }}
