@@ -268,8 +268,9 @@ class HypothesisStream:
         self.uri_html_annotations = defaultdict(list)
         self.uri_updates = {}
         self.uris_by_recent_update = []
-        self.limit = 200 if limit is None else limit
+        #self.limit = 200 if limit is None else limit
         self.by_user = 'no'
+        self.by_domain = 'no'
         self.selected_tags = None
         self.selected_user = None
         self.redis_host = 'h.jonudell.info'
@@ -321,9 +322,9 @@ class HypothesisStream:
         url = '/stream.alt?user='
         if self.selected_user is not None:
             url += self.selected_user
-        url += '&limit='
-        if self.limit is not None:
-            url += str(self.limit)
+        #url += '&limit='
+        #if self.limit is not None:
+        #    url += str(self.limit)
         return url
 
     def make_quote_html(self,raw):
@@ -412,14 +413,18 @@ class HypothesisStream:
             tags = None
         if q.has_key('user'):
             h_stream.by_user='yes'
-        else:
-            h_stream.by_user = 'no'
-        user, picklist, userlist = h_stream.get_active_user_data(q)  
-        if q.has_key('user'):
             user = q['user'][0]
-            #if user not in userlist:
-            #    picklist = ''
-        if h_stream.by_user=='no':
+        if q.has_key('domain'):
+            h_stream.by_domain='yes'
+            domain = q['domain'][0]
+        else:
+            h_stream.by_domain = 'no'
+        user, picklist, userlist = h_stream.get_active_user_data(q)  
+        if h_stream.by_domain=='yes':
+            head = '<h1 class="stream-picklist">recently active user %s</h1>' % (picklist)
+            head += '<h1>urls recently annotated in %s</h1>' % domain
+            body = h_stream.make_alt_stream(user=None, tags=tags, domain=domain)
+        elif h_stream.by_user=='no':
             head = '<h1 class="stream-picklist">recently active user %s</h1>' % (picklist)
             head += '<h1>urls recently annotated</h1>'
             body = h_stream.make_alt_stream(user=None, tags=tags)
@@ -524,12 +529,12 @@ class HypothesisStream:
         self.show_thread(id, level=0)
         return self.current_thread
 
-    def make_alt_stream(self, user=None, tags=None):
+    def make_alt_stream(self, user=None, tags=None, domain=None):
         """Do requested API search, organize results."""
 
         #self.debug = True
 
-        params = { 'limit': self.limit }
+        params = {  }
 
         if user is not None:
             self.selected_user = user
@@ -539,8 +544,20 @@ class HypothesisStream:
             self.selected_tags = tags
             params['tags'] = tags
 
-        for row in HypothesisUtils(max_results=400).search_all(params):
-           self.add_row(row)
+        if domain is None:
+            max = 400
+        else:
+            max = 2000
+
+        for row in HypothesisUtils(max_results=max).search_all(params):
+            try:
+                uri = row['uri']
+                uri = uri.replace('http://','').replace('https://','')
+                if domain is not None and uri.startswith(domain) == False:
+                    continue
+                self.add_row(row)
+            except:
+                traceback.print_exc()
         self.sort()
 
         s = ''
