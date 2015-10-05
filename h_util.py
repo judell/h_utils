@@ -633,7 +633,7 @@ class HypothesisStream:
     def make_active_users_selectable(self, user=None):
         """Enumerate active users, enable selection of one."""
         active_users = HypothesisUtils().get_active_users()
-        most_active_user = active_users[0][0]
+        most_recently_active_user = active_users[0][0]
         select = ''
         for active_user in active_users:
             if user is not None and active_user[0] == user:
@@ -647,7 +647,10 @@ class HypothesisStream:
     <option>choose</option>
     %s
     </select>""" % (select)
-        return most_active_user, select, active_users
+        if user==None:
+            return most_recently_active_user, select, active_users
+        else:
+            return user, select, active_users
 
     @staticmethod
     def alt_stream_js(request):
