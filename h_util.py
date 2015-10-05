@@ -471,7 +471,7 @@ class HypothesisStream:
             photo_url = 'http://jonudell.net/h/generic-user.jpg' 
         image_html = '<img class="user-image-small" src="%s"/></a>' % photo_url
         if self.by_user == 'no':
-            image_html = '<a title="%s most recently annotated by %s, click for %s\'s recent annotations" href="/stream.alt?user=%s">%s</a>' % (uri, user, user, user, image_html)
+            image_html = '<a title="click for %s\'s recent annotations" href="/stream.alt?user=%s">%s</a>' % (user, user, image_html)
         s += image_html
         s += """<a title="toggle %s annotations" href="javascript:toggle_dom_id('%s')">[%d]</a> <a target="_new" class="ng-binding" href="%s">%s</a> 
 (<a title="use Hypothesis proxy" target="_new" href="%s/%s">via</a>)"""  % (count, dom_id, count, uri, doc_title, via_url, uri)
