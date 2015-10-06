@@ -713,8 +713,8 @@ class HypothesisStream:
     a.selected-tag-item {{ rgb(215, 216, 212); padding:3px; color:black; border: 1px solid black;}}
     .user-contributions: {{ clear:left }}
     .user-image-small {{ height: 20px; vertical-align:middle; margin-right:4px; padding:0 }}
-    .other-users {{ font-size:smaller;font-style:italic }}
-    .stream-uri-raw {{ word-wrap: break-word; font-size:smaller;font-style:italic; font-weight:bold }}
+    .other-users {{ font-size:smaller;font-style:italic; line-height:1.3; margin-top:6px }}
+    .stream-uri-raw {{ word-wrap: break-word; font-size:smaller;font-style:italic; font-weight:bold; line-height:1.3; margin-top:6px }}
     .stream-active-users-widget {{ margin-top: 20px }}
     .paper {{ margin:15px; border-color:rgb(192, 184, 184); border-width:thin;border-style:solid }}
     .tag-cloud-item {{ border: none }}
@@ -999,7 +999,7 @@ class HypothesisRawAnnotation:
             self.target = row['target']
 
         self.is_page_note = False
-        if self.references == [] and self.target[0].has_key('selector') == False:
+        if self.references == [] and len(self.target) and self.target[0].has_key('selector') == False:
             self.is_page_note = True
         if row.has_key('document') and row['document'].has_key('link'):
             self.links = row['document']['link']
