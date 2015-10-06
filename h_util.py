@@ -999,7 +999,7 @@ class HypothesisRawAnnotation:
             self.target = row['target']
 
         self.is_page_note = False
-        if self.references == [] and self.target == []: 
+        if self.references == [] and self.target[0].has_key('selector') == False:
             self.is_page_note = True
         if row.has_key('document') and row['document'].has_key('link'):
             self.links = row['document']['link']
