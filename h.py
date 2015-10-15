@@ -1,4 +1,4 @@
-"""
+﻿"""
 /activity
 /feed?tags=[TAG]
 /urlfeed?url=[URL]
@@ -16,6 +16,52 @@ host = 'h.jonudell.info'
 port = 8080
 host_port = 'http://' + host + ':' + str(port)
 alt_stream = 'http://h.jonudell.info:5000'
+
+def group_urls(request):
+    group = urlparse.parse_qs(request.query_string)['group'][0]
+    api_call = "https://hypothes.is/api/search?limit=200&group=" + group
+    h = HypothesisUtils(username='judell',password='hy$qvr')
+    h.login()
+    headers = {'Authorization': 'Bearer ' + h.token, 'Content-Type': 'application/json;charset=utf-8' }
+    r = requests.get(api_call, headers=headers)
+    text = r.text.decode('utf-8')
+    obj = json.loads(text)
+    rows = obj['rows']
+    urls = defaultdict(int)
+    users = defaultdict(int)
+    for row in rows:
+        raw = HypothesisRawAnnotation(row)
+        urls[raw.uri] += 1
+        users[raw.user] += 1
+
+    urls_as_html = ''
+    url_keys = urls.keys()
+    url_keys.sort()
+    for url in url_keys:
+        urls_as_html += '<p><a href="%s">%s</a> (%s)</p>' % (url, url, urls[url])
+
+    users_as_html = ''
+    user_keys = users.keys()
+    user_keys.sort()
+    for user in user_keys:
+        users_as_html += '<p>%s (%s)</p>' % (user, users[user])
+
+    html = """
+<html>
+<head><style>
+body { font-family: verdana; margin: .5in; }
+</style></head>
+<body>
+<h1>Annotated URLs for group %s</h1>
+%s
+<h1>Users active in group %s</h1>
+%s
+</body>
+</html>
+ """ % ( group, urls_as_html, group, users_as_html)
+    r = Response(html.encode('utf-8'))
+    r.content_type = 'text/html'
+    return r
 
 def count(request):
     url = urlparse.parse_qs(request.query_string)['url'][0]
@@ -124,20 +170,20 @@ def activity(request):
     return Response(body.encode('utf-8'))
 
 def make_activity(j):
-    """Activity report."""
+    """Activity report."""   
     users = defaultdict(int)
-    hours = defaultdict(int)
+    minutes = defaultdict(int)
     rows = j['rows']
     for row in rows:
         raw = HypothesisRawAnnotation(row)
         created = raw.updated
-        hour = created[0:13]
-        hours[hour] += 1
+        minute = created[0:16]
+        minutes[minute] += 1
         user = raw.user
         users[user] += 1
         uri = raw.uri
 
-    hours = sorted(hours.items(), key=operator.itemgetter(0,1), reverse=True)
+    minutes = sorted(minutes.items(), key=operator.itemgetter(0,1), reverse=True)
 
     users = sorted(users.items(), key=operator.itemgetter(1,0), reverse=True)
 
@@ -152,15 +198,15 @@ body { font-family: verdana; margin: .2in; }
 </body>
 </html>
  """
-    s = '<p>hours: %s </p>' % len(hours)
-    for hour in hours:
-        s += '<div>%s: %s</div>' % (hour[0], hour[1])
+    s = '<p>minutes: %s </p>' % len(minutes)
+    for minute in minutes:
+        s += '<div>%s: %s</div>' % (minute[0], minute[1])
 
     s += '<p>users: %s</p>' % len(users)
     for user in users:
         uname = re.sub('.+\\:','',user[0])
         uname = re.sub('@.+','',uname)
-        url = alt_stream + '/stream.alt?by_url=no&user=' +  uname
+        url = alt_stream + '/stream.alt?user=' +  uname
         s += '<div><a target="_new" title="see annotation activity" href="%s">%s</a>: %s</div>' % (url, uname, user[1])
 
     return html % s
@@ -224,6 +270,9 @@ if __name__ == '__main__':
 
     config.add_route('count', '/count')
     config.add_view(count, route_name='count')
+
+    config.add_route('group_urls', '/group_urls')
+    config.add_view(group_urls, route_name='group_urls')
 
     app = config.make_wsgi_app()
     server = make_server(host, port, app)
